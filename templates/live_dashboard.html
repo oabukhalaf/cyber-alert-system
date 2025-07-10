@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Cybersecurity Alerts</title>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <style>
+        body { font-family: Helvetica; padding: 20px; }
+        h1 { color: darkred; }
+        #alerts { margin-top: 20px; }
+    </style>
+</head>
+<body>s
+    <h1>🔴 Real-Time Cybersecurity Alerts</h1>
+    <ul id="alerts"></ul>
+
+    <script>
+        const socket = io();
+
+        socket.on("new_alert", function(alertMessage) {
+            const li = document.createElement("li");
+            li.textContent = alertMessage;
+            document.getElementById("alerts").appendChild(li);
+        });
+    </script>
+</body>
+</html>

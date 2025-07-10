@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cyber Alert Dashboard</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        h2 { margin-top: 30px; }
+    </style>
+</head>
+<body>
+    <h1>🔐 Cybersecurity Alert Dashboard</h1>
+
+    <h2>📊 Failed Login Attempts</h2>
+    <ul>
+        {% for ip, count in failed.items() %}
+        <li>{{ ip }} — {{ count }} failed attempts</li>
+        {% endfor %}
+    </ul>
+
+    <h2>✅ Successful Login Attempts</h2>
+    <ul>
+        {% for ip, count in successful.items() %}
+        <li>{{ ip }} — {{ count }} successful attempts</li>
+        {% endfor %}
+    </ul>
+
+    <h2>🧑 Username Appearance Count</h2>
+    <ul>
+        {% for user, count in users.items() %}
+        <li>{{ user }} — appeared {{ count }} time(s)</li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
