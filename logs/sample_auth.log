@@ -1,0 +1,9 @@
+May 20 14:22:01 localhost sshd[12345]: Failed password for invalid user admin from 192.168.1.50 port 56742 ssh2
+May 20 14:22:04 localhost sshd[12345]: Failed password for root from 192.168.1.50 port 56743 ssh2
+May 20 14:22:07 localhost sshd[12345]: Failed password for root from 192.168.1.50 port 56744 ssh2
+May 20 14:22:10 localhost sshd[12345]: Accepted password for alice from 192.168.1.10 port 60000 ssh2
+May 20 14:22:13 localhost sshd[12345]: Failed password for invalid user test from 192.168.1.99 port 56745 ssh2
+May 26 14:22:01 localhost sshd[12345]: Failed password for invalid user hacker from 192.168.1.10 port 54221 ssh2
+May 26 14:22:03 localhost sshd[12345]: Failed password for root from 192.168.1.11 port 54222 ssh2
+May 26 14:40:00 localhost sshd[12345]: Failed password for root from 10.0.0.123 port 60000 ssh2
+Jul 8 21:30:00 localhost sshd[12345]: Failed password for root from 10.0.0.99 port 9999 ssh2
