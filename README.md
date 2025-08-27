@@ -11,18 +11,18 @@ Features
 
 Project Structure
 cyber-alert-system/
-├── dashboard.py             # Renders dashboard views
-├── log_parser.py            # Parses and processes log files
-├── realtime_dashboard.py    # Hosts live dashboard with real-time updates
-├── realtime_log_tracker.py  # Tracks log changes continuously
-├── requirements.txt         # Python dependencies
-├── logs/
-│   ├── sample_auth.log      # Sample log file for demonstration
-│   └── placeholder
-└── templates/
-    ├── dashboard.html       # Static dashboard template
-    ├── live_dashboard.html  # Live dashboard template
-    └── placeholder
+    dashboard.py             # Renders dashboard views
+    log_parser.py            # Parses and processes log files
+    realtime_dashboard.py    # Hosts live dashboard with real-time updates
+    realtime_log_tracker.py  # Tracks log changes continuously
+    requirements.txt         # Python dependencies
+    logs/
+        sample_auth.log      # Sample log file for demonstration
+        placeholder
+    templates/
+        dashboard.html       # Static dashboard template
+        live_dashboard.html  # Live dashboard template
+        placeholder
 
 
 Installation & Usage
