@@ -1,7 +1,9 @@
+import time
+
 import pytest
 
 from cyber_alert.tailer import LogTailer
-from cyber_alert.web import create_app, publish_new_events
+from cyber_alert.web import create_app, publish_new_events, start_log_watcher
 
 PREFIX = "Sep 27 10:31:15 web-01 sshd[2412]: "
 
@@ -69,3 +71,22 @@ def test_new_log_lines_are_pushed_to_connected_clients(log_file):
     assert message["name"] == "auth_event"
     assert message["args"][0]["username"] == "oracle"
     assert message["args"][0]["source_ip"] == "198.51.100.23"
+
+
+def test_background_watcher_streams_appended_lines(log_file):
+    app = create_app(log_file)
+    client = app.extensions["socketio"].test_client(app)
+    stop = start_log_watcher(app, poll_interval=0.01)
+    try:
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(f"{PREFIX}Accepted publickey for alice from 10.0.4.21 port 51022 ssh2\n")
+
+        received = []
+        deadline = time.monotonic() + 5
+        while not received and time.monotonic() < deadline:
+            received = client.get_received()
+            time.sleep(0.01)
+    finally:
+        stop.set()
+
+    assert [m["args"][0]["username"] for m in received] == ["alice"]

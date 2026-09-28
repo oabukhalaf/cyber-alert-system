@@ -72,6 +72,12 @@ def test_ipv6_source_is_normalized():
     assert event.source_ip == "2001:db8::1f"
 
 
+def test_hostname_source_from_usedns_is_kept():
+    event = parse("Failed password for root from scanner.example.net port 60122 ssh2")
+
+    assert event.source_ip == "scanner.example.net"
+
+
 def test_username_cannot_spoof_the_source_ip():
     # An attacker picks a username that looks like the rest of the log message.
     event = parse(
