@@ -1,9 +1,50 @@
-May 20 14:22:01 localhost sshd[12345]: Failed password for invalid user admin from 192.168.1.50 port 56742 ssh2
-May 20 14:22:04 localhost sshd[12345]: Failed password for root from 192.168.1.50 port 56743 ssh2
-May 20 14:22:07 localhost sshd[12345]: Failed password for root from 192.168.1.50 port 56744 ssh2
-May 20 14:22:10 localhost sshd[12345]: Accepted password for alice from 192.168.1.10 port 60000 ssh2
-May 20 14:22:13 localhost sshd[12345]: Failed password for invalid user test from 192.168.1.99 port 56745 ssh2
-May 26 14:22:01 localhost sshd[12345]: Failed password for invalid user hacker from 192.168.1.10 port 54221 ssh2
-May 26 14:22:03 localhost sshd[12345]: Failed password for root from 192.168.1.11 port 54222 ssh2
-May 26 14:40:00 localhost sshd[12345]: Failed password for root from 10.0.0.123 port 60000 ssh2
-Jul 8 21:30:00 localhost sshd[12345]: Failed password for root from 10.0.0.99 port 9999 ssh2
+Sep 27 08:02:11 web-01 sshd[2101]: Accepted publickey for alice from 10.0.4.21 port 51022 ssh2: ED25519 SHA256:q8V2hX0mYk1yJf3u6RrZ0bT9Lw4sPq7dNc5aKe2GhUo
+Sep 27 08:02:11 web-01 sshd[2101]: pam_unix(sshd:session): session opened for user alice(uid=1001) by (uid=0)
+Sep 27 08:17:01 web-01 CRON[2140]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+Sep 27 08:17:01 web-01 CRON[2140]: pam_unix(cron:session): session closed for user root
+Sep 27 08:45:37 web-01 sshd[2188]: Accepted password for bob from 10.0.4.35 port 49811 ssh2
+Sep 27 08:45:37 web-01 sshd[2188]: pam_unix(sshd:session): session opened for user bob(uid=1002) by (uid=0)
+Sep 27 09:12:04 web-01 sshd[2230]: Failed password for bob from 10.0.4.35 port 49870 ssh2
+Sep 27 09:12:09 web-01 sshd[2230]: Accepted password for bob from 10.0.4.35 port 49870 ssh2
+Sep 27 09:12:09 web-01 sshd[2230]: pam_unix(sshd:session): session opened for user bob(uid=1002) by (uid=0)
+Sep 27 10:31:15 web-01 sshd[2412]: Failed password for root from 203.0.113.45 port 40112 ssh2
+Sep 27 10:31:24 web-01 sshd[2412]: message repeated 5 times: [ Failed password for root from 203.0.113.45 port 40112 ssh2]
+Sep 27 10:31:24 web-01 sshd[2412]: error: maximum authentication attempts exceeded for root from 203.0.113.45 port 40112 ssh2 [preauth]
+Sep 27 10:31:24 web-01 sshd[2412]: Disconnecting authenticating user root 203.0.113.45 port 40112: Too many authentication failures [preauth]
+Sep 27 10:31:27 web-01 sshd[2419]: Failed password for root from 203.0.113.45 port 40130 ssh2
+Sep 27 10:31:30 web-01 sshd[2419]: Failed password for root from 203.0.113.45 port 40130 ssh2
+Sep 27 10:31:33 web-01 sshd[2419]: Failed password for root from 203.0.113.45 port 40130 ssh2
+Sep 27 10:31:33 web-01 sshd[2419]: Connection closed by authenticating user root 203.0.113.45 port 40130 [preauth]
+Sep 27 11:05:48 web-01 sshd[2530]: Accepted publickey for j.smith from 10.0.4.52 port 50344 ssh2: RSA SHA256:Zk3vT1pW8yQ0nL5dF2sB7xR4mC9hJ6uA1eG0oI3tYw8
+Sep 27 11:05:48 web-01 sshd[2530]: pam_unix(sshd:session): session opened for user j.smith(uid=1004) by (uid=0)
+Sep 27 13:05:02 web-01 sshd[3050]: Invalid user admin from 198.51.100.23 port 52210
+Sep 27 13:05:04 web-01 sshd[3050]: Failed password for invalid user admin from 198.51.100.23 port 52210 ssh2
+Sep 27 13:05:05 web-01 sshd[3050]: Connection closed by invalid user admin 198.51.100.23 port 52210 [preauth]
+Sep 27 13:05:06 web-01 sshd[3052]: Invalid user oracle from 198.51.100.23 port 52224
+Sep 27 13:05:08 web-01 sshd[3052]: Failed password for invalid user oracle from 198.51.100.23 port 52224 ssh2
+Sep 27 13:05:10 web-01 sshd[3055]: Invalid user postgres from 198.51.100.23 port 52238
+Sep 27 13:05:12 web-01 sshd[3055]: Failed password for invalid user postgres from 198.51.100.23 port 52238 ssh2
+Sep 27 13:05:14 web-01 sshd[3058]: Invalid user ubuntu from 198.51.100.23 port 52251
+Sep 27 13:05:16 web-01 sshd[3058]: Failed password for invalid user ubuntu from 198.51.100.23 port 52251 ssh2
+Sep 27 13:05:18 web-01 sshd[3061]: Invalid user test from 198.51.100.23 port 52265
+Sep 27 13:05:20 web-01 sshd[3061]: Failed password for invalid user test from 198.51.100.23 port 52265 ssh2
+Sep 27 13:05:22 web-01 sshd[3064]: Failed password for alice from 198.51.100.23 port 52279 ssh2
+Sep 27 13:05:25 web-01 sshd[3067]: Failed password for bob from 198.51.100.23 port 52293 ssh2
+Sep 27 13:05:27 web-01 sshd[3070]: Invalid user  from 198.51.100.23 port 52300
+Sep 27 13:05:29 web-01 sshd[3070]: Failed password for invalid user  from 198.51.100.23 port 52300 ssh2
+Sep 27 13:05:31 web-01 sshd[3073]: Failed password for deploy from 198.51.100.23 port 52314 ssh2
+Sep 27 13:05:33 web-01 sshd[3076]: Invalid user git from 198.51.100.23 port 52327
+Sep 27 13:05:35 web-01 sshd[3076]: Failed password for invalid user git from 198.51.100.23 port 52327 ssh2
+Sep 27 14:20:41 web-01 sshd[3301]: Failed password for root from 2001:db8:85a3::8a2e:370:7334 port 60122 ssh2
+Sep 27 14:20:44 web-01 sshd[3301]: Failed password for root from 2001:db8:85a3::8a2e:370:7334 port 60122 ssh2
+Sep 27 14:20:45 web-01 sshd[3301]: Connection closed by authenticating user root 2001:db8:85a3::8a2e:370:7334 port 60122 [preauth]
+Sep 27 16:48:10 web-01 sshd[3890]: Failed password for deploy from 192.0.2.77 port 58001 ssh2
+Sep 27 16:48:14 web-01 sshd[3890]: Failed password for deploy from 192.0.2.77 port 58001 ssh2
+Sep 27 16:48:18 web-01 sshd[3890]: Failed password for deploy from 192.0.2.77 port 58001 ssh2
+Sep 27 16:48:21 web-01 sshd[3890]: Failed password for deploy from 192.0.2.77 port 58001 ssh2
+Sep 27 16:48:25 web-01 sshd[3890]: Accepted password for deploy from 192.0.2.77 port 58001 ssh2
+Sep 27 16:48:25 web-01 sshd[3890]: pam_unix(sshd:session): session opened for user deploy(uid=1005) by (uid=0)
+Sep 27 17:17:01 web-01 CRON[4001]: pam_unix(cron:session): session opened for user root(uid=0) by (uid=0)
+Sep 27 17:17:01 web-01 CRON[4001]: pam_unix(cron:session): session closed for user root
+Sep 27 17:52:30 web-01 sshd[4120]: Received disconnect from 10.0.4.21 port 51022:11: disconnected by user
+Sep 27 17:52:30 web-01 sshd[4120]: pam_unix(sshd:session): session closed for user alice

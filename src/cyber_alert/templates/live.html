@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Live feed{% endblock %}
+{% block content %}
+<h1>Live feed <small id="status" class="muted">connecting…</small></h1>
+<p class="muted">SSH authentication events appear here as they're written to <code>{{ log_file }}</code>.</p>
+
+<table>
+  <thead>
+    <tr><th>Time</th><th>Event</th><th>Username</th><th>Source IP</th><th>Method</th></tr>
+  </thead>
+  <tbody id="events">
+    <tr id="placeholder"><td colspan="5" class="muted">Waiting for new events…</td></tr>
+  </tbody>
+</table>
+<style>
+  .auth_failure td:nth-child(2), .invalid_user td:nth-child(2) { color: var(--failure); }
+  .auth_success td:nth-child(2) { color: var(--success); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"
+        integrity="sha384-mkQ3/7FUtcGyoppY6bz/PORYoGqOl7/aSUMn2ymDOJcapfS6PHqxhRTMh1RR0Q6+"
+        crossorigin="anonymous"></script>
+<script>
+  const LABELS = { auth_failure: "Failed", auth_success: "Accepted", invalid_user: "Nonexistent user" };
+  const MAX_ROWS = 500;
+  const rows = document.getElementById("events");
+  const statusLabel = document.getElementById("status");
+  const socket = io();
+
+  socket.on("connect", () => { statusLabel.textContent = "connected"; });
+  socket.on("disconnect", () => { statusLabel.textContent = "disconnected"; });
+
+  socket.on("auth_event", (event) => {
+    document.getElementById("placeholder")?.remove();
+    const row = rows.insertRow(0);  // newest first
+    row.className = event.event_type;
+    const cells = [
+      new Date(event.timestamp).toLocaleString(),
+      LABELS[event.event_type] + (event.count > 1 ? ` ×${event.count}` : ""),
+      event.username || "(empty)",
+      event.source_ip,
+      event.method ?? "",
+    ];
+    // textContent, never innerHTML: usernames in the log are attacker-controlled.
+    for (const text of cells) row.insertCell().textContent = text;
+    while (rows.rows.length > MAX_ROWS) rows.deleteRow(-1);
+  });
+</script>
+{% endblock %}

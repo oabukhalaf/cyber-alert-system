@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} · Cyber Alert</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --muted: #6b7280;
+      --border: #d1d5db;
+      --failure: #b91c1c;
+      --success: #15803d;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --muted: #9ca3af; --border: #374151; --failure: #f87171; --success: #4ade80; }
+    }
+    body { font-family: system-ui, sans-serif; line-height: 1.5; max-width: 1040px; margin: 0 auto; padding: 24px 16px; }
+    nav { display: flex; gap: 20px; align-items: baseline; margin-bottom: 24px; }
+    nav a { color: inherit; }
+    h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    h2 { font-size: 1.05rem; margin: 0 0 8px; }
+    code { font-size: 0.9em; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+    th { font-weight: 600; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .muted { color: var(--muted); }
+    .error { color: var(--failure); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <nav>
+    <strong>Cyber Alert</strong>
+    <a href="{{ url_for('summary_page') }}">Summary</a>
+    <a href="{{ url_for('live_page') }}">Live feed</a>
+  </nav>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

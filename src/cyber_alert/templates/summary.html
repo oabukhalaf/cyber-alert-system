@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Summary{% endblock %}
+{% block content %}
+<h1>Login summary</h1>
+<p class="muted">Source: <code>{{ log_file }}</code></p>
+
+{% if error %}
+  <p class="error">Could not read the log file: {{ error }}</p>
+{% elif summary.total_events == 0 %}
+  <p>No SSH authentication events found.</p>
+{% else %}
+  <p>
+    {{ summary.total_events }} auth events from
+    {{ summary.first_seen.strftime("%Y-%m-%d %H:%M:%S") }} to
+    {{ summary.last_seen.strftime("%Y-%m-%d %H:%M:%S") }}:
+    {{ summary.total_failures }} failed, {{ summary.total_successes }} successful.
+  </p>
+  <div class="grid">
+    {% for title, column, counter in [
+      ("Failed logins by source IP", "Source IP", summary.failures_by_ip),
+      ("Successful logins by source IP", "Source IP", summary.successes_by_ip),
+      ("Login attempts by username", "Username", summary.attempts_by_user),
+      ("Nonexistent usernames tried", "Username", summary.invalid_usernames),
+    ] if counter %}
+    <section>
+      <h2>{{ title }}</h2>
+      <table>
+        <thead><tr><th>{{ column }}</th><th class="num">Count</th></tr></thead>
+        <tbody>
+          {% for key, count in counter.most_common(10) %}
+          <tr><td>{{ key or "(empty)" }}</td><td class="num">{{ count }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if counter | length > 10 %}
+      <p class="muted">and {{ counter | length - 10 }} more</p>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}
