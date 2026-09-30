@@ -13,6 +13,7 @@ authors = [{ name = "Omar Abukhalaf" }]
 dependencies = [
     "flask>=3.0",
     "flask-socketio>=5.3",
+    "pyyaml>=6.0",
     "simple-websocket>=1.0",
 ]
 

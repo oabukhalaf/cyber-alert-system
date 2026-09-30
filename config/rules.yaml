@@ -1,0 +1,18 @@
+# Detection rule settings, used with `cyber-alert --rules config/rules.yaml ...`.
+#
+# The values below are the built-in defaults. Rules left out of this file run with
+# their defaults; set `enabled: false` to turn one off. Durations accept s, m, h
+# and d suffixes, or a bare number of seconds.
+
+rules:
+  # T1110.003: one source trying many different usernames.
+  ssh-password-spray:
+    enabled: true
+    distinct_users: 5
+    window: 5m
+
+  # T1110: a successful login from a source with recent failed logins.
+  ssh-login-after-failures:
+    enabled: true
+    min_failures: 3
+    window: 10m
