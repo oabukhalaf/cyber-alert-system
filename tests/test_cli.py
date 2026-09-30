@@ -60,6 +60,65 @@ def test_watch_prints_parsed_events(monkeypatch, capsys):
     assert "FAILED" in out[0] and "root from 203.0.113.45 via password" in out[0]
 
 
+def test_detect_on_sample_log(capsys):
+    assert cli.main(["detect", str(SAMPLE_LOG)]) == 0
+
+    out = capsys.readouterr().out
+    assert "ALERT  MEDIUM    T1110.003  Password spray from 198.51.100.23" in out
+    assert "ALERT  CRITICAL  T1110      Login as deploy from 192.0.2.77" in out
+    assert out.rstrip().endswith("2 alerts: 1 critical, 1 medium")
+
+
+def test_detect_saves_alerts_once(tmp_path, capsys):
+    db = tmp_path / "alerts.db"
+
+    cli.main(["detect", str(SAMPLE_LOG), "--db", str(db)])
+    cli.main(["detect", str(SAMPLE_LOG), "--db", str(db)])
+
+    out = capsys.readouterr().out
+    assert "Saved 2 new alert(s)" in out
+    assert "Saved 0 new alert(s)" in out
+
+
+def test_detect_with_rules_file(tmp_path, capsys):
+    rules = tmp_path / "rules.yaml"
+    rules.write_text("rules:\n  ssh-password-spray:\n    enabled: false\n", encoding="utf-8")
+
+    cli.main(["detect", str(SAMPLE_LOG), "--rules", str(rules)])
+
+    out = capsys.readouterr().out
+    assert "Password spray" not in out
+    assert "1 alert: 1 critical" in out
+
+
+def test_detect_without_alerts(tmp_path, capsys):
+    log = tmp_path / "auth.log"
+    log.write_text(FAILED_LINE + "\n")
+
+    cli.main(["detect", str(log)])
+
+    assert capsys.readouterr().out.strip() == "No alerts."
+
+
+def test_invalid_rules_file_exits_with_status_2(tmp_path, capsys):
+    rules = tmp_path / "rules.yaml"
+    rules.write_text("rules:\n  ssh-password-spray:\n    treshold: 3\n", encoding="utf-8")
+
+    assert cli.main(["detect", str(SAMPLE_LOG), "--rules", str(rules)]) == 2
+    assert "treshold: unknown setting" in capsys.readouterr().err
+
+
+def test_watch_alerts_only(monkeypatch, capsys):
+    lines = SAMPLE_LOG.read_text(encoding="utf-8").splitlines()
+    monkeypatch.setattr(cli, "follow", lambda *args, **kwargs: iter(lines))
+
+    cli.main(["watch", "auth.log", "--alerts-only"])
+
+    out = capsys.readouterr().out
+    assert "FAILED" not in out
+    assert out.count("ALERT") == 2
+
+
 def test_format_event_escapes_terminal_control_characters():
     event = AuthEvent(
         timestamp=datetime(2026, 9, 27, 10, 31, 15, tzinfo=timezone.utc),
