@@ -4,6 +4,15 @@
 <h1>Live feed <small id="status" class="muted">connecting…</small></h1>
 <p class="muted">SSH authentication events appear here as they're written to <code>{{ log_file }}</code>.</p>
 
+<section id="alerts-section" hidden>
+  <h2>New alerts</h2>
+  <table>
+    <thead><tr><th>Last seen</th><th>Severity</th><th>Alert</th><th>Technique</th></tr></thead>
+    <tbody id="alerts"></tbody>
+  </table>
+  <h2 style="margin-top: 24px">Events</h2>
+</section>
+
 <table>
   <thead>
     <tr><th>Time</th><th>Event</th><th>Username</th><th>Source IP</th><th>Method</th></tr>
@@ -46,6 +55,34 @@
     // textContent, never innerHTML: usernames in the log are attacker-controlled.
     for (const text of cells) row.insertCell().textContent = text;
     while (rows.rows.length > MAX_ROWS) rows.deleteRow(-1);
+  });
+
+  const alertRows = document.getElementById("alerts");
+
+  socket.on("alert", (alert) => {
+    document.getElementById("alerts-section").hidden = false;
+    const row = alertRows.insertRow(0);
+    row.insertCell().textContent = new Date(alert.last_seen).toLocaleString();
+
+    const badge = document.createElement("span");
+    badge.className = `severity ${alert.severity}`;
+    badge.textContent = alert.severity;
+    row.insertCell().append(badge);
+
+    const title = document.createElement("strong");
+    title.textContent = alert.title;
+    const description = document.createElement("span");
+    description.className = "muted";
+    description.textContent = alert.description;
+    row.insertCell().append(title, document.createElement("br"), description);
+
+    const link = document.createElement("a");
+    link.href = alert.technique.url;
+    link.title = alert.technique.name;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = alert.technique.id;
+    row.insertCell().append(link);
   });
 </script>
 {% endblock %}
