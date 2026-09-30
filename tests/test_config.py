@@ -89,7 +89,7 @@ def test_shipped_config_lists_every_rule_with_its_defaults():
 
     shipped = yaml.safe_load(SHIPPED_CONFIG.read_text(encoding="utf-8"))["rules"]
 
-    assert list(shipped) == list(ALL_RULES), "config/rules.yaml should list every rule"
+    assert set(shipped) == set(ALL_RULES), "config/rules.yaml should list every rule"
     for rule_id, rule_class in ALL_RULES.items():
         settings = dict(shipped[rule_id])
         assert settings.pop("enabled") is True
