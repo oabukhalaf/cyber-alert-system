@@ -21,3 +21,8 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local alert databases
+*.db
+*.db-shm
+*.db-wal
