@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cyber-alert-system"
-version = "0.2.0"
+version = "0.3.0"
 description = "Monitor SSH authentication logs and surface suspicious login activity."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,6 +13,7 @@ authors = [{ name = "Omar Abukhalaf" }]
 dependencies = [
     "flask>=3.0",
     "flask-socketio>=5.3",
+    "pyyaml>=6.0",
     "simple-websocket>=1.0",
 ]
 

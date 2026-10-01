@@ -4,6 +4,17 @@
 <h1>Login summary</h1>
 <p class="muted">Source: <code>{{ log_file }}</code></p>
 
+<p>
+  {% if alert_counts %}
+    <a href="{{ url_for('alerts_page') }}">Alerts</a>:
+    {% for severity in Severity | reverse if alert_counts[severity] %}
+      <span class="severity {{ severity.name.lower() }}">{{ alert_counts[severity] }} {{ severity.name.lower() }}</span>
+    {% endfor %}
+  {% else %}
+    No alerts raised.
+  {% endif %}
+</p>
+
 {% if error %}
   <p class="error">Could not read the log file: {{ error }}</p>
 {% elif summary.total_events == 0 %}
