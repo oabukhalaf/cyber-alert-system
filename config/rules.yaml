@@ -5,6 +5,12 @@
 # and d suffixes, or a bare number of seconds.
 
 rules:
+  # T1110.001: one source failing repeatedly against the same username.
+  ssh-brute-force:
+    enabled: true
+    threshold: 5
+    window: 1m
+
   # T1110.003: one source trying many different usernames.
   ssh-password-spray:
     enabled: true
