@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 import threading
 from pathlib import Path
 
@@ -35,10 +36,18 @@ CONTENT_SECURITY_POLICY = "; ".join(
     ]
 )
 
+# Python takes MIME types from the Windows registry, where installed software can map
+# .js to text/plain. Browsers refuse to run a script served that way (all the more
+# with nosniff), which would leave the dashboard blank, so pin the types we serve.
+STATIC_MIME_TYPES = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml"}
+
 
 def create_app(
     log_file: str | Path, *, db_path: str | Path, rules_file: str | Path | None = None
 ) -> Flask:
+    for extension, mimetype in STATIC_MIME_TYPES.items():
+        mimetypes.add_type(mimetype, extension)
+
     app = Flask(__name__)
     app.config["LOG_FILE"] = str(log_file)
     SocketIO(app, async_mode="threading")  # registers itself as app.extensions["socketio"]

@@ -1,3 +1,4 @@
+import mimetypes
 import re
 import time
 
@@ -75,6 +76,17 @@ def test_static_files_are_served(make_app, log_file, path, mimetype):
 
     assert response.status_code == 200
     assert response.mimetype == mimetype
+
+
+def test_script_type_does_not_depend_on_the_system_mime_table(make_app, log_file):
+    # Simulate a Windows registry that maps .js to text/plain, as some machines' do.
+    mimetypes.add_type("text/plain", ".js")
+    try:
+        response = make_app(log_file).test_client().get("/static/dashboard.js")
+    finally:
+        mimetypes.add_type("text/javascript", ".js")
+
+    assert response.mimetype == "text/javascript"
 
 
 def test_new_lines_are_published_and_counted(make_app, log_file):
