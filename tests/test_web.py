@@ -1,39 +1,19 @@
+import re
 import time
 
 import pytest
-from factories import failure, success
+from conftest import PREFIX
 
 from cyber_alert.config import ConfigError
-from cyber_alert.rules import LoginAfterFailuresRule
 from cyber_alert.tailer import LogTailer
-from cyber_alert.web import create_app, publish_new_events, start_log_watcher
+from cyber_alert.web import publish_new_events, start_log_watcher
 
-PREFIX = "Sep 27 10:31:15 web-01 sshd[2412]: "
 BREAK_IN = [
     f"{PREFIX}Failed password for deploy from 192.0.2.77 port 58001 ssh2\n",
     f"{PREFIX}Failed password for deploy from 192.0.2.77 port 58001 ssh2\n",
     f"{PREFIX}Failed password for deploy from 192.0.2.77 port 58001 ssh2\n",
     f"{PREFIX}Accepted password for deploy from 192.0.2.77 port 58001 ssh2\n",
 ]
-
-
-@pytest.fixture
-def log_file(tmp_path):
-    path = tmp_path / "auth.log"
-    path.write_text(
-        f"{PREFIX}Failed password for root from 203.0.113.45 port 40112 ssh2\n"
-        f"{PREFIX}Accepted password for bob from 10.0.4.35 port 49811 ssh2\n",
-        encoding="utf-8",
-    )
-    return path
-
-
-@pytest.fixture
-def make_app(tmp_path):
-    def make(log, **kwargs):
-        return create_app(log, db_path=tmp_path / "alerts.db", **kwargs)
-
-    return make
 
 
 def append(path, lines):
@@ -51,69 +31,53 @@ def received_until(client, predicate, timeout=5.0):
     return messages
 
 
-def test_summary_page_shows_counts(make_app, log_file):
+def test_dashboard_page(make_app, log_file):
     response = make_app(log_file).test_client().get("/")
 
     assert response.status_code == 200
     page = response.get_data(as_text=True)
-    assert "1 failed, 1 successful" in page
-    assert "203.0.113.45" in page
-    assert "No alerts raised." in page
+    assert str(log_file) in page
+    assert "<option>ssh-brute-force</option>" in page  # rule filter choices
+    assert "/static/dashboard.js" in page
 
 
-def test_summary_page_escapes_usernames(make_app, tmp_path):
-    log = tmp_path / "auth.log"
-    log.write_text(
-        f"{PREFIX}Failed password for invalid user <script>alert(1)</script> "
-        "from 203.0.113.9 port 4000 ssh2\n",
-        encoding="utf-8",
-    )
+def test_dashboard_has_no_inline_scripts_or_styles(make_app, log_file):
+    page = make_app(log_file).test_client().get("/").get_data(as_text=True)
 
-    page = make_app(log).test_client().get("/").get_data(as_text=True)
-
-    assert "<script>alert(1)</script>" not in page
-    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page
+    # The Content-Security-Policy forbids inline code, so none may exist.
+    assert all("src=" in tag for tag in re.findall(r"<script[^>]*>", page))
+    assert "<style" not in page
+    assert " style=" not in page
 
 
-def test_summary_page_reports_missing_log(make_app, tmp_path):
-    response = make_app(tmp_path / "missing.log").test_client().get("/")
+def test_security_headers(make_app, log_file):
+    headers = make_app(log_file).test_client().get("/").headers
 
-    assert response.status_code == 503
-    assert "Could not read the log file" in response.get_data(as_text=True)
+    policy = headers["Content-Security-Policy"]
+    assert "script-src 'self' https://cdn.socket.io" in policy
+    assert "style-src 'self'" in policy
+    assert "unsafe-inline" not in policy
+    assert "frame-ancestors 'none'" in policy
+    assert headers["X-Frame-Options"] == "DENY"
+    assert headers["Referrer-Policy"] == "no-referrer"
 
 
-def test_live_page_loads_socketio_client(make_app, log_file):
-    response = make_app(log_file).test_client().get("/live")
+@pytest.mark.parametrize(
+    ("path", "mimetype"),
+    [
+        ("/static/dashboard.js", "text/javascript"),
+        ("/static/dashboard.css", "text/css"),
+        ("/static/favicon.svg", "image/svg+xml"),
+    ],
+)
+def test_static_files_are_served(make_app, log_file, path, mimetype):
+    response = make_app(log_file).test_client().get(path)
 
     assert response.status_code == 200
-    assert "socket.io.min.js" in response.get_data(as_text=True)
+    assert response.mimetype == mimetype
 
 
-def test_alerts_page_without_alerts(make_app, log_file):
-    page = make_app(log_file).test_client().get("/alerts").get_data(as_text=True)
-
-    assert "No alerts yet." in page
-
-
-def test_alerts_page_lists_stored_alerts_safely(make_app, log_file):
-    app = make_app(log_file)
-    alert = LoginAfterFailuresRule().alert(
-        title="Login as <b>x</b>",
-        description="d",
-        events=[failure("deploy", at=0), success("deploy", at=5)],
-    )
-    app.extensions["alert_store"].add(alert)
-    client = app.test_client()
-
-    alerts_page = client.get("/alerts").get_data(as_text=True)
-    summary_page = client.get("/").get_data(as_text=True)
-
-    assert "Login as &lt;b&gt;x&lt;/b&gt;" in alerts_page
-    assert "https://attack.mitre.org/techniques/T1110/" in alerts_page
-    assert "1 critical" in summary_page
-
-
-def test_new_lines_are_published_as_events_and_alerts(make_app, log_file):
+def test_new_lines_are_published_and_counted(make_app, log_file):
     app = make_app(log_file)
     client = app.extensions["socketio"].test_client(app)
     tailer = LogTailer(log_file)  # only new lines
@@ -124,7 +88,8 @@ def test_new_lines_are_published_as_events_and_alerts(make_app, log_file):
     messages = client.get_received()
     assert [m["name"] for m in messages] == ["auth_event"] * 4 + ["alert"]
     assert messages[-1]["args"][0]["rule_id"] == "ssh-login-after-failures"
-    assert len(app.extensions["alert_store"].recent()) == 1
+    summary = app.extensions["monitor"].summary()
+    assert (summary["failed_logins"], summary["successful_logins"]) == (3, 1)
 
 
 def test_known_alerts_are_not_announced_again(make_app, log_file):
@@ -137,7 +102,7 @@ def test_known_alerts_are_not_announced_again(make_app, log_file):
     publish_new_events(restarted, LogTailer(log_file, from_start=True))
 
     assert "alert" not in [m["name"] for m in client.get_received()]
-    assert len(restarted.extensions["alert_store"].recent()) == 1
+    assert len(restarted.extensions["monitor"].store.recent()) == 1
 
 
 def test_background_watcher_processes_existing_and_new_lines(make_app, log_file):

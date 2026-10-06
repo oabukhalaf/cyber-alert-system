@@ -31,7 +31,7 @@ cyber-alert = "cyber_alert.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-cyber_alert = ["templates/*.html"]
+cyber_alert = ["templates/*.html", "static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

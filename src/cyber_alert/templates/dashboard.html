@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cyber Alert</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+</head>
+<body>
+<header class="page-header">
+  <div>
+    <h1>Cyber Alert</h1>
+    <p class="secondary">Monitoring <code>{{ log_file }}</code></p>
+  </div>
+  <p class="connection" id="connection" data-state="connecting">
+    <span class="dot" aria-hidden="true"></span><span id="connection-label">Connecting…</span>
+  </p>
+</header>
+
+<main>
+  <section class="tiles" aria-label="Totals">
+    <div class="tile"><p class="tile-label">Auth events</p><p class="tile-value" id="total-events">–</p></div>
+    <div class="tile"><p class="tile-label">Failed logins</p><p class="tile-value" id="failed-logins">–</p></div>
+    <div class="tile"><p class="tile-label">Successful logins</p><p class="tile-value" id="successful-logins">–</p></div>
+    <div class="tile"><p class="tile-label">Source IPs</p><p class="tile-value" id="unique-sources">–</p></div>
+    <div class="tile">
+      <p class="tile-label">Alerts</p><p class="tile-value" id="alert-total">–</p>
+      <p class="tile-detail" id="alert-breakdown"></p>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Login attempts over time</h2>
+      <ul class="legend">
+        <li><span class="key successes" aria-hidden="true"></span>Successful</li>
+        <li><span class="key failures" aria-hidden="true"></span>Failed</li>
+      </ul>
+    </div>
+    <div class="chart" id="timeline"></div>
+    <details class="table-view">
+      <summary>Show as table</summary>
+      <table>
+        <thead><tr><th>Period starting</th><th class="num">Successful</th><th class="num">Failed</th></tr></thead>
+        <tbody id="timeline-table"></tbody>
+      </table>
+    </details>
+  </section>
+
+  <div class="columns">
+    <section class="card">
+      <h2>Top sources of failed logins</h2>
+      <ol class="bars" id="top-sources"></ol>
+    </section>
+    <section class="card">
+      <h2>Most-targeted usernames</h2>
+      <ol class="bars" id="top-usernames"></ol>
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Alerts</h2>
+      <div class="filters">
+        <label>Severity
+          <select id="filter-severity">
+            <option value="">All</option>
+            <option value="critical">Critical</option>
+            <option value="high">High and above</option>
+            <option value="medium">Medium and above</option>
+          </select>
+        </label>
+        <label>Rule
+          <select id="filter-rule">
+            <option value="">All</option>
+            {% for rule_id in rule_ids %}<option>{{ rule_id }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Source IP
+          <input id="filter-ip" type="search" placeholder="e.g. 203.0.113.45" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Last seen</th><th>Severity</th><th>Alert</th><th>Technique</th>
+            <th>Usernames</th><th class="num">Events</th>
+          </tr>
+        </thead>
+        <tbody id="alerts"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Recent events</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Time</th><th>Event</th><th>Username</th><th>Source IP</th><th>Method</th></tr>
+        </thead>
+        <tbody id="events"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+
+<script src="https://cdn.socket.io/4.8.1/socket.io.min.js"
+        integrity="sha384-mkQ3/7FUtcGyoppY6bz/PORYoGqOl7/aSUMn2ymDOJcapfS6PHqxhRTMh1RR0Q6+"
+        crossorigin="anonymous"></script>
+<script type="module" src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>

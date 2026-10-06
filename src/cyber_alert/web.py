@@ -1,4 +1,4 @@
-"""Flask + Socket.IO dashboard: login summary, alert history and a live feed."""
+"""Flask + Socket.IO dashboard and JSON API."""
 
 from __future__ import annotations
 
@@ -6,18 +6,34 @@ import logging
 import threading
 from pathlib import Path
 
-from flask import Flask, render_template
+from flask import Flask, Response, render_template
 from flask_socketio import SocketIO
 
-from .alerts import Severity
+from .api import api
 from .config import load_rules
 from .detection import Detector
-from .parser import parse_file, parse_lines
-from .stats import summarize
+from .monitor import Monitor
+from .parser import parse_lines
+from .rules import ALL_RULES
 from .store import AlertStore
 from .tailer import LogTailer
 
 log = logging.getLogger(__name__)
+
+# All scripts and styles are served as files, so the policy can forbid inline code:
+# even if an attacker-controlled username slipped past escaping, it couldn't run.
+CONTENT_SECURITY_POLICY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self' https://cdn.socket.io",
+        "style-src 'self'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+    ]
+)
 
 
 def create_app(
@@ -26,35 +42,23 @@ def create_app(
     app = Flask(__name__)
     app.config["LOG_FILE"] = str(log_file)
     SocketIO(app, async_mode="threading")  # registers itself as app.extensions["socketio"]
-    app.extensions["alert_store"] = store = AlertStore(db_path)
     # Load rules now so a bad config file fails at startup, not in the watcher thread.
-    app.extensions["detector"] = Detector(load_rules(rules_file))
+    app.extensions["monitor"] = Monitor(Detector(load_rules(rules_file)), AlertStore(db_path))
+    app.register_blueprint(api)
 
-    @app.context_processor
-    def template_helpers():
-        return {"Severity": Severity}
+    @app.after_request
+    def security_headers(response: Response) -> Response:
+        response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        return response
 
     @app.get("/")
-    def summary_page():
-        log_file = app.config["LOG_FILE"]
-        alert_counts = store.count_by_severity()
-        try:
-            summary = summarize(parse_file(log_file))
-        except OSError as exc:
-            return render_template(
-                "summary.html", log_file=log_file, alert_counts=alert_counts, error=exc.strerror
-            ), 503
+    def dashboard():
         return render_template(
-            "summary.html", log_file=log_file, alert_counts=alert_counts, summary=summary
+            "dashboard.html", log_file=app.config["LOG_FILE"], rule_ids=list(ALL_RULES)
         )
-
-    @app.get("/alerts")
-    def alerts_page():
-        return render_template("alerts.html", alerts=store.recent(limit=200))
-
-    @app.get("/live")
-    def live_page():
-        return render_template("live.html", log_file=app.config["LOG_FILE"])
 
     return app
 
@@ -62,9 +66,9 @@ def create_app(
 def start_log_watcher(app: Flask, *, poll_interval: float = 1.0) -> threading.Event:
     """Run detection on the app's log file and push events and alerts to browsers.
 
-    The whole existing file is processed first, so alerts for activity that
-    happened while the dashboard was down are still raised. Alerts already in
-    the store are recognized and not announced twice.
+    The whole existing file is processed first, so the dashboard's statistics
+    cover it and alerts for activity that happened while the dashboard was down
+    are still raised. Alerts already in the store aren't announced twice.
 
     Returns an event that stops the watcher when set.
     """
@@ -88,15 +92,13 @@ def start_log_watcher(app: Flask, *, poll_interval: float = 1.0) -> threading.Ev
 def publish_new_events(app: Flask, tailer: LogTailer) -> int:
     """Process newly logged lines; return how many auth events they contained."""
     socketio: SocketIO = app.extensions["socketio"]
-    detector: Detector = app.extensions["detector"]
-    store: AlertStore = app.extensions["alert_store"]
+    monitor: Monitor = app.extensions["monitor"]
 
     count = 0
     for event in parse_lines(tailer.poll()):
         count += 1
         socketio.emit("auth_event", event.to_dict())
-        for alert in detector.process(event):
-            if store.add(alert):
-                log.warning("%s: %s", alert.severity.name, alert.title)
-                socketio.emit("alert", alert.to_dict())
+        for alert in monitor.process(event):
+            log.warning("%s: %s", alert.severity.name, alert.title)
+            socketio.emit("alert", alert.to_dict())
     return count
