@@ -11,6 +11,11 @@ successful logins that follow a run of failures. Each alert is mapped to a
 MITRE ATT&CK technique. Alerts appear in the terminal or on a live web dashboard
 and are saved to SQLite.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/dashboard-dark.jpg">
+  <img alt="Dashboard showing totals, a timeline of successful and failed logins, top attacking IPs and targeted usernames, and three alerts from the sample log" src="docs/dashboard-light.jpg">
+</picture>
+
 ## Features
 
 - **Detection rules mapped to MITRE ATT&CK.** Stateful sliding-window rules with
@@ -26,9 +31,13 @@ and are saved to SQLite.
   process name used by OpenSSH 9.8+.
 - **Rotation-safe tailing.** Follows the log like `tail -F`: survives logrotate's
   truncation and file replacement, and never emits half-written lines.
-- **Command line and web dashboard.** `summary`, `detect`, `watch` and `serve`
-  commands. The dashboard has a login summary, alert history, and a live feed of
-  events and alerts pushed over WebSockets (Flask + Socket.IO).
+- **Live dashboard.** Totals, a timeline of successful and failed logins, top
+  attacking IPs and targeted usernames, filterable alerts and recent events, updated
+  over WebSockets (Flask + Socket.IO) as the log grows. Charts are plain SVG with a
+  table view, in light and dark themes.
+- **REST API.** Read-only JSON endpoints for the summary, timeline, alerts and events
+  (see [REST API](#rest-api)).
+- **Command line.** `summary`, `detect`, `watch` and `serve` commands.
 - **Safe handling of hostile input.** Log contents are attacker-controlled, so the
   parser, terminal output and dashboard are all built so that input can't spoof,
   inject into or hide anything.
@@ -68,8 +77,7 @@ dashboard, run the following and open <http://127.0.0.1:5000>:
 cyber-alert serve
 ```
 
-The dashboard has three pages: the login summary at `/`, alert history at `/alerts`,
-and a live feed at `/live` that shows events and alerts as lines are appended to the log.
+The dashboard updates within about two seconds as lines are appended to the log.
 
 ## Detection rules
 
@@ -110,14 +118,33 @@ cyber-alert serve   [LOG] [--rules FILE] [--db FILE] [--host H] [--port P] [--de
 - `--db` saves alerts to a SQLite database. `serve` always keeps alert history, in
   `cyber-alert.db` unless `--db` says otherwise. When it starts, it processes the whole
   existing log, so activity that happened while it was down still raises alerts.
-- The dashboard binds to `127.0.0.1` by default. `--debug` turns on Flask's interactive
-  debugger, which allows code execution, so never combine it with a public `--host`.
+- The dashboard binds to `127.0.0.1` by default. It has no login of its own, so to reach
+  it from another machine, put it behind a reverse proxy that handles authentication
+  rather than binding it to a public `--host`. `--debug` turns on Flask's interactive
+  debugger, which allows code execution; use it only locally.
 
 To monitor a real server (reading auth logs usually requires root or the `adm` group):
 
 ```bash
 sudo .venv/bin/cyber-alert watch /var/log/auth.log --alerts-only --db alerts.db
 ```
+
+## REST API
+
+`cyber-alert serve` also exposes read-only JSON endpoints, which the dashboard is built on:
+
+| Endpoint | Returns | Query parameters |
+|---|---|---|
+| `GET /api/summary` | Totals, top failed-login sources and usernames, alert counts by severity | `top` (default 10) |
+| `GET /api/timeline` | Successful and failed logins per time bucket | `bucket`: `auto` (default), or a duration such as `15m`, `1h` |
+| `GET /api/alerts` | Stored alerts, newest first | `severity` (minimum), `rule`, `source_ip`, `limit` (default 100) |
+| `GET /api/events` | The most recent auth events, newest first | `limit` (default 100) |
+
+```bash
+curl "http://127.0.0.1:5000/api/alerts?severity=critical"
+```
+
+Limits accept 1–500. Invalid parameters return HTTP 400 with a JSON `error` message.
 
 ## Project structure
 
@@ -130,13 +157,17 @@ src/cyber_alert/
     alerts.py      Alert model, severities, ATT&CK techniques
     config.py      YAML rule configuration and validation
     store.py       SQLite alert history
-    stats.py       Aggregate counts for the summary views
+    stats.py       Running totals and the login timeline
+    monitor.py     Live state the dashboard reads: detection, stats, recent events
     cli.py         `cyber-alert` command
-    web.py         Flask app factory and Socket.IO event stream
-    templates/     Dashboard pages
+    web.py         Flask app factory, security headers, Socket.IO event stream
+    api.py         JSON API
+    templates/     Dashboard page
+    static/        Dashboard JavaScript and CSS
 config/rules.yaml  Rule settings (the built-in defaults)
 tests/             pytest suite
 logs/              Sample auth log
+docs/              Screenshots
 ```
 
 ## Design notes
@@ -173,12 +204,28 @@ logs/              Sample auth log
   has read and uses the file's identity (device and inode) to spot rotation. It reopens
   the file on each poll so it never blocks rotation, including on Windows, where an open
   file can't be renamed.
-- **Escape on output.** Usernames are escaped in HTML (Jinja autoescaping, `textContent`
-  in the live feed) and in the terminal, where control characters are shown as `\x1b`
-  so a username can't inject ANSI escape sequences.
+- **Escape on output.** In the terminal, control characters in usernames are shown as
+  `\x1b`, so a username can't inject ANSI escape sequences.
 - **Year inference.** Classic syslog timestamps have no year. Events are assigned the
   most recent year that doesn't put them in the future, so logs spanning New Year parse
   correctly.
+
+### Dashboard
+
+- **Defense in depth against XSS.** Log text reaches the page only through
+  `textContent`, never `innerHTML`. All scripts and styles are served as files, so a
+  Content-Security-Policy can forbid inline code entirely: even if escaping were
+  missed somewhere, an injected `<script>` or `onerror=` handler wouldn't run.
+- **Statistics are kept live, not recomputed.** The log watcher updates running
+  totals and a per-minute timeline as events arrive, under a lock that keeps the
+  dashboard's reads consistent. The timeline regroups per-minute counts into whatever
+  bucket size fits the time span.
+- **Coalesced refreshes.** A burst of log lines produces one dashboard refresh per
+  second, not one per line. If the Socket.IO client can't load, the page falls back
+  to polling.
+- **No chart library.** The charts are drawn as SVG and HTML, which keeps third-party
+  scripts to one (Socket.IO). Chart colors were checked for colorblind separation
+  and contrast in both themes, and the timeline has a table view for screen readers.
 
 ## Development
 
@@ -200,7 +247,7 @@ config file stays in sync with every rule's defaults.
 - [x] Detection engine with brute-force, password-spray and login-after-failures rules
       mapped to MITRE ATT&CK
 - [x] YAML rule configuration and persistent alert storage (SQLite)
-- [ ] Richer dashboard: charts, filtering, and a REST API
+- [x] Live dashboard with charts and alert filtering, and a REST API
 - [ ] Alert notifications (Slack, Discord, email)
 - [ ] Docker image and an attack simulator for demos
 
