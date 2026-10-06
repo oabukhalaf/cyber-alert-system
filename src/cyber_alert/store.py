@@ -70,11 +70,32 @@ class AlertStore:
             )
             return cursor.rowcount == 1
 
-    def recent(self, limit: int = 100) -> list[Alert]:
-        """The most recent alerts, newest first."""
+    def recent(
+        self,
+        limit: int = 100,
+        *,
+        min_severity: Severity | None = None,
+        rule_id: str | None = None,
+        source_ip: str | None = None,
+    ) -> list[Alert]:
+        """The most recent alerts matching every given filter, newest first."""
+        # Only fixed SQL fragments are joined; filter values travel as parameters.
+        conditions, params = [], []
+        if min_severity is not None:
+            conditions.append("severity >= ?")
+            params.append(int(min_severity))
+        if rule_id is not None:
+            conditions.append("rule_id = ?")
+            params.append(rule_id)
+        if source_ip is not None:
+            conditions.append("source_ip = ?")
+            params.append(source_ip)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
         with closing(self._connect()) as db:
             rows = db.execute(
-                "SELECT * FROM alerts ORDER BY last_seen DESC, id DESC LIMIT ?", (limit,)
+                f"SELECT * FROM alerts {where} ORDER BY last_seen DESC, id DESC LIMIT ?",
+                (*params, limit),
             ).fetchall()
         return [_from_row(row) for row in rows]
 

@@ -91,3 +91,20 @@ def test_concurrent_writers(tmp_path):
         thread.join()
 
     assert len(store.recent(limit=1000)) == 80
+
+
+def test_recent_filters_combine(tmp_path):
+    store = AlertStore(tmp_path / "alerts.db")
+    store.add(spray_alert("198.51.100.1"))
+    store.add(spray_alert("198.51.100.2"))
+    store.add(compromise_alert())
+
+    def rules(**filters):
+        return [(a.rule_id, a.source_ip) for a in store.recent(**filters)]
+
+    assert rules(min_severity=Severity.CRITICAL) == [("ssh-login-after-failures", "203.0.113.45")]
+    assert len(rules(min_severity=Severity.MEDIUM)) == 3
+    assert rules(rule_id="ssh-password-spray", source_ip="198.51.100.2") == [
+        ("ssh-password-spray", "198.51.100.2")
+    ]
+    assert rules(source_ip="' OR 1=1 --") == []  # values are bound parameters, not SQL
