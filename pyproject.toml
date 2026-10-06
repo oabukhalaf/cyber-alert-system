@@ -21,6 +21,8 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-cov>=5",
+    # Turns test failures into annotations on the PR, readable without opening CI logs.
+    "pytest-github-actions-annotate-failures>=0.2",
     "ruff>=0.6",
 ]
 
