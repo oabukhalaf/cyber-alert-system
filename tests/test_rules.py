@@ -125,6 +125,16 @@ def test_login_after_failures_ignores_failures_from_other_sources():
     assert run(rule, [*failures, success(ip="10.0.4.21", at=10)]) == []
 
 
+def test_occasional_typos_followed_by_logins_are_not_suspicious():
+    # One mistyped password before each of three logins within ten minutes.
+    rule = LoginAfterFailuresRule(min_failures=3, window=timedelta(minutes=10))
+    events = []
+    for minute in (0, 3, 6):
+        events += [failure("bob", at=minute * 60), success("bob", at=minute * 60 + 5)]
+
+    assert run(rule, events) == []
+
+
 def test_login_after_failures_does_not_realert_on_the_same_failures():
     rule = LoginAfterFailuresRule(min_failures=3)
     failures = [failure(at=i) for i in range(3)]
