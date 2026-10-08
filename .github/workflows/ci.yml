@@ -42,3 +42,34 @@ jobs:
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev]"
       - run: pytest --cov=cyber_alert --cov-report=term-missing
+
+  docker:
+    # End-to-end: build the image, run the dashboard against the attack simulator,
+    # and require every kind of simulated attack to be detected.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and start the dashboard and simulator
+        run: docker compose up --detach --build --wait
+        env:
+          SIMULATOR_SPEED: "5"
+      - name: Wait for all three alert types
+        run: |
+          for attempt in $(seq 1 45); do
+            kinds=$(curl -fsS http://127.0.0.1:5000/api/alerts \
+              | python3 -c "import json, sys; print(len({a['rule_id'] for a in json.load(sys.stdin)['alerts']}))" \
+              || echo 0)
+            if [ "$kinds" = "3" ]; then
+              echo "All three alert types raised after about $((attempt * 2)) seconds"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Expected all three alert types within 90 seconds"
+          exit 1
+      - name: Show container logs
+        if: failure()
+        run: docker compose logs
+      - name: Stop
+        if: always()
+        run: docker compose down --volumes

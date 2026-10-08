@@ -1,0 +1,19 @@
+# Only pyproject.toml, README.md, LICENSE, src/ and config/ are needed in the image.
+.git
+.github
+.venv
+venv
+docs
+logs
+tests
+**/__pycache__
+**/*.py[cod]
+*.egg-info
+build
+dist
+.pytest_cache
+.ruff_cache
+.coverage
+*.db
+*.db-shm
+*.db-wal

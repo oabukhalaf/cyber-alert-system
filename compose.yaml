@@ -1,0 +1,35 @@
+# Demo: the dashboard plus a simulator writing attacks to a shared log.
+#
+#   docker compose up --build
+#
+# then open http://127.0.0.1:5000. Alerts appear within about a minute.
+
+services:
+  dashboard:
+    build: .
+    image: cyber-alert
+    ports:
+      # This machine only: the dashboard has no login of its own.
+      - "127.0.0.1:5000:5000"
+    volumes:
+      - logs:/logs
+      - data:/data
+      # To send notifications, mount your own config and pass its secrets through:
+      # - ./my-config.yaml:/etc/cyber-alert/cyber-alert.yaml:ro
+    # environment:
+    #   - SLACK_WEBHOOK_URL
+    restart: unless-stopped
+
+  simulator:
+    build: .
+    image: cyber-alert
+    command: ["cyber-alert", "simulate", "/logs/auth.log", "--speed", "${SIMULATOR_SPEED:-1}"]
+    volumes:
+      - logs:/logs
+    healthcheck:
+      disable: true  # the image's check is for the dashboard
+    restart: unless-stopped
+
+volumes:
+  logs:
+  data:
