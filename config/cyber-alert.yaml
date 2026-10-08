@@ -1,0 +1,56 @@
+# Settings for `cyber-alert --config config/cyber-alert.yaml ...`.
+#
+# Both sections are optional. Durations accept s, m, h and d suffixes, or a bare
+# number of seconds. Secrets belong in environment variables: write ${NAME} and
+# the value is read from the environment when the file is loaded.
+
+# Detection rules. The values below are the built-in defaults; rules left out of
+# this section keep their defaults, and `enabled: false` turns one off.
+rules:
+  # T1110.001: one source failing repeatedly against the same username.
+  ssh-brute-force:
+    enabled: true
+    threshold: 5
+    window: 1m
+
+  # T1110.003: one source trying many different usernames.
+  ssh-password-spray:
+    enabled: true
+    distinct_users: 5
+    window: 5m
+
+  # T1110: a successful login from a source with recent failed logins.
+  ssh-login-after-failures:
+    enabled: true
+    min_failures: 3
+    window: 10m
+
+# Where to send alerts as they're raised (by `serve` and `watch`).
+notifications:
+  # Alerts below this severity aren't sent: low, medium, high or critical.
+  min_severity: high
+  # Alerts about activity older than this are stored but not sent, so a first
+  # run over an old log doesn't flood your channels.
+  max_age: 1h
+  # Add channels here. Check them with `cyber-alert test-notifications --config FILE`.
+  channels: []
+  #  - type: slack
+  #    webhook_url: ${SLACK_WEBHOOK_URL}
+  #
+  #  - type: discord
+  #    webhook_url: ${DISCORD_WEBHOOK_URL}
+  #    min_severity: critical        # override the default for one channel
+  #
+  #  - type: email
+  #    smtp_host: smtp.example.com
+  #    smtp_port: 587                # default: 587 for starttls, 465 for ssl
+  #    security: starttls            # starttls, ssl or none
+  #    username: ${SMTP_USERNAME}
+  #    password: ${SMTP_PASSWORD}
+  #    from: alerts@example.com
+  #    to: [oncall@example.com]
+  #
+  #  - type: webhook                 # POSTs {"source": "cyber-alert", "alert": {...}}
+  #    url: https://example.com/hooks/cyber-alert
+  #    headers:
+  #      Authorization: Bearer ${WEBHOOK_TOKEN}

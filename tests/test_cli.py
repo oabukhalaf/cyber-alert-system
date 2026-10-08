@@ -83,11 +83,11 @@ def test_detect_saves_alerts_once(tmp_path, capsys):
     assert "Saved 0 new alert(s)" in second_run
 
 
-def test_detect_with_rules_file(tmp_path, capsys):
+def test_detect_with_config_file(tmp_path, capsys):
     rules = tmp_path / "rules.yaml"
     rules.write_text("rules:\n  ssh-password-spray:\n    enabled: false\n", encoding="utf-8")
 
-    cli.main(["detect", str(SAMPLE_LOG), "--rules", str(rules)])
+    cli.main(["detect", str(SAMPLE_LOG), "--config", str(rules)])
 
     out = capsys.readouterr().out
     assert "Password spray" not in out
@@ -103,11 +103,11 @@ def test_detect_without_alerts(tmp_path, capsys):
     assert capsys.readouterr().out.strip() == "No alerts."
 
 
-def test_invalid_rules_file_exits_with_status_2(tmp_path, capsys):
+def test_invalid_config_file_exits_with_status_2(tmp_path, capsys):
     rules = tmp_path / "rules.yaml"
     rules.write_text("rules:\n  ssh-password-spray:\n    treshold: 3\n", encoding="utf-8")
 
-    assert cli.main(["detect", str(SAMPLE_LOG), "--rules", str(rules)]) == 2
+    assert cli.main(["detect", str(SAMPLE_LOG), "--config", str(rules)]) == 2
     assert "treshold: unknown setting" in capsys.readouterr().err
 
 
@@ -148,3 +148,56 @@ def test_version(capsys):
 
     assert exit_info.value.code == 0
     assert capsys.readouterr().out.startswith("cyber-alert ")
+
+
+# --- Notifications ------------------------------------------------------------------
+
+
+def notification_config(tmp_path, url):
+    path = tmp_path / "cyber-alert.yaml"
+    # The sample log is days old; a long max_age lets its alerts through.
+    path.write_text(
+        f"notifications:\n  max_age: 3650d\n  channels:\n    - {{type: webhook, url: '{url}'}}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_test_notifications_reports_each_channel(tmp_path, webhook_server, capsys):
+    config = notification_config(tmp_path, webhook_server.url)
+
+    assert cli.main(["test-notifications", "--config", str(config)]) == 0
+
+    assert capsys.readouterr().out == "OK      webhook (127.0.0.1)\n"
+    alert = webhook_server.received[0]["json"]["alert"]
+    assert alert["title"] == "Test notification from cyber-alert"
+
+
+def test_test_notifications_reports_failures(tmp_path, webhook_server, capsys):
+    webhook_server.statuses.append(400)
+    config = notification_config(tmp_path, webhook_server.url)
+
+    assert cli.main(["test-notifications", "--config", str(config)]) == 1
+    assert capsys.readouterr().out == "FAILED  webhook (127.0.0.1): HTTP 400\n"
+
+
+def test_test_notifications_without_channels(monkeypatch, capsys):
+    monkeypatch.delenv("CYBER_ALERT_CONFIG", raising=False)
+
+    assert cli.main(["test-notifications"]) == 1
+    assert "No notification channels are configured" in capsys.readouterr().err
+
+
+def test_watch_notifies_once_per_new_alert(tmp_path, webhook_server, monkeypatch):
+    lines = SAMPLE_LOG.read_text(encoding="utf-8").splitlines()
+    monkeypatch.setattr(cli, "follow", lambda *args, **kwargs: iter(lines))
+    config = notification_config(tmp_path, webhook_server.url)
+    args = ["watch", "auth.log", "--alerts-only", "--config", str(config)]
+    args += ["--db", str(tmp_path / "alerts.db")]
+
+    cli.main(args)
+    cli.main(args)  # a restart over the same log: its alerts are already stored
+
+    # Only the critical alert clears the default "high" threshold, and only once.
+    rule_ids = [request["json"]["alert"]["rule_id"] for request in webhook_server.received]
+    assert rule_ids == ["ssh-login-after-failures"]

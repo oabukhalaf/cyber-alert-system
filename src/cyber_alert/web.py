@@ -11,9 +11,10 @@ from flask import Flask, Response, render_template
 from flask_socketio import SocketIO
 
 from .api import api
-from .config import load_rules
+from .config import load_config
 from .detection import Detector
 from .monitor import Monitor
+from .notify import Notifier
 from .parser import parse_lines
 from .rules import ALL_RULES
 from .store import AlertStore
@@ -43,7 +44,7 @@ STATIC_MIME_TYPES = {".js": "text/javascript", ".css": "text/css", ".svg": "imag
 
 
 def create_app(
-    log_file: str | Path, *, db_path: str | Path, rules_file: str | Path | None = None
+    log_file: str | Path, *, db_path: str | Path, config_file: str | Path | None = None
 ) -> Flask:
     for extension, mimetype in STATIC_MIME_TYPES.items():
         mimetypes.add_type(mimetype, extension)
@@ -51,8 +52,12 @@ def create_app(
     app = Flask(__name__)
     app.config["LOG_FILE"] = str(log_file)
     SocketIO(app, async_mode="threading")  # registers itself as app.extensions["socketio"]
-    # Load rules now so a bad config file fails at startup, not in the watcher thread.
-    app.extensions["monitor"] = Monitor(Detector(load_rules(rules_file)), AlertStore(db_path))
+    # Load config now so a bad file fails at startup, not in the watcher thread.
+    config = load_config(config_file)
+    app.extensions["monitor"] = Monitor(Detector(config.rules), AlertStore(db_path))
+    app.extensions["notifier"] = (
+        Notifier(config.channels, max_age=config.notify_max_age) if config.channels else None
+    )
     app.register_blueprint(api)
 
     @app.after_request
@@ -102,6 +107,7 @@ def publish_new_events(app: Flask, tailer: LogTailer) -> int:
     """Process newly logged lines; return how many auth events they contained."""
     socketio: SocketIO = app.extensions["socketio"]
     monitor: Monitor = app.extensions["monitor"]
+    notifier: Notifier | None = app.extensions["notifier"]
 
     count = 0
     for event in parse_lines(tailer.poll()):
@@ -110,4 +116,6 @@ def publish_new_events(app: Flask, tailer: LogTailer) -> int:
         for alert in monitor.process(event):
             log.warning("%s: %s", alert.severity.name, alert.title)
             socketio.emit("alert", alert.to_dict())
+            if notifier is not None:
+                notifier.submit(alert)
     return count

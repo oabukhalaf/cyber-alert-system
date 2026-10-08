@@ -21,8 +21,12 @@ and are saved to SQLite.
 - **Detection rules mapped to MITRE ATT&CK.** Stateful sliding-window rules with
   per-rule thresholds, alert throttling, and severity levels (see
   [Detection rules](#detection-rules)).
-- **Configurable.** Tune or disable rules in a YAML file. Misspelled settings and
-  invalid values are reported as errors instead of being silently ignored.
+- **Notifications.** Sends alerts to Slack, Discord, email or any webhook, with
+  retries, per-channel severity thresholds, and escaping so attacker-chosen usernames
+  can't ping a channel or inject email headers (see [Notifications](#notifications)).
+- **Configurable.** Tune rules and notifications in one YAML file, with secrets kept
+  in environment variables. Misspelled settings and invalid values are reported as
+  errors instead of being silently ignored.
 - **Persistent alert history.** Alerts are stored in SQLite, and storing the same
   alert twice has no effect, so restarts and re-scans never create duplicates.
 - **Robust log parsing.** Handles password, public-key and keyboard-interactive logins,
@@ -37,7 +41,8 @@ and are saved to SQLite.
   table view, in light and dark themes.
 - **REST API.** Read-only JSON endpoints for the summary, timeline, alerts and events
   (see [REST API](#rest-api)).
-- **Command line.** `summary`, `detect`, `watch` and `serve` commands.
+- **Command line.** `summary`, `detect`, `watch`, `serve` and `test-notifications`
+  commands.
 - **Safe handling of hostile input.** Log contents are attacker-controlled, so the
   parser, terminal output and dashboard are all built so that input can't spoof,
   inject into or hide anything.
@@ -88,7 +93,8 @@ The dashboard updates within about two seconds as lines are appended to the log.
 | `ssh-login-after-failures` | [T1110](https://attack.mitre.org/techniques/T1110/) Brute Force | Critical | A login **succeeds** from an IP with 3+ failed logins in the previous 10 minutes |
 
 A sustained attack produces one alert, not one per log line. To change thresholds or
-turn rules off, edit [`config/rules.yaml`](config/rules.yaml) and pass it with `--rules`:
+turn rules off, edit [`config/cyber-alert.yaml`](config/cyber-alert.yaml) and pass it
+with `--config` (or set `$CYBER_ALERT_CONFIG`):
 
 ```yaml
 rules:
@@ -101,20 +107,68 @@ rules:
 
 Rules left out of the file keep their defaults.
 
+## Notifications
+
+`serve` and `watch` can send alerts as they're raised. Add channels to the
+`notifications` section of the config file:
+
+```yaml
+notifications:
+  min_severity: high      # default; low, medium, high or critical
+  max_age: 1h             # alerts about older activity are stored but not sent
+  channels:
+    - type: slack
+      webhook_url: ${SLACK_WEBHOOK_URL}
+    - type: discord
+      webhook_url: ${DISCORD_WEBHOOK_URL}
+      min_severity: critical
+    - type: email
+      smtp_host: smtp.example.com
+      username: ${SMTP_USERNAME}
+      password: ${SMTP_PASSWORD}
+      from: alerts@example.com
+      to: [oncall@example.com]
+    - type: webhook       # POSTs {"source": "cyber-alert", "alert": {...}} as JSON
+      url: https://example.com/hooks/cyber-alert
+      headers:
+        Authorization: Bearer ${WEBHOOK_TOKEN}
+```
+
+`${NAME}` is replaced with the environment variable `NAME` when the file is loaded,
+so secrets stay out of the file. Then check that every channel works:
+
+```bash
+cyber-alert test-notifications --config config/cyber-alert.yaml
+```
+
+- **Only new alerts are sent.** With a database, alerts already stored (for example,
+  after a restart) aren't sent again.
+- **No floods from history.** `max_age` keeps a first run over an old log from
+  sending days of alerts at once.
+- **Delivery never slows detection.** Alerts are sent from a background thread with a
+  10-second timeout and up to 3 attempts, backing off between them (and honoring
+  `Retry-After` when rate-limited). Errors that retrying can't fix, such as a rejected
+  webhook URL, aren't retried.
+- Webhook URLs must use `https://` (plain `http://` is allowed only to `localhost`),
+  and log messages identify channels by host only, never by their secret URL.
+
 ## Usage
 
 ```text
 cyber-alert summary [LOG] [--top N]
     Login statistics for a log file
-cyber-alert detect  [LOG] [--rules FILE] [--db FILE]
+cyber-alert detect  [LOG] [--config FILE] [--db FILE]
     Run detection rules over a log file
-cyber-alert watch   [LOG] [--rules FILE] [--db FILE] [--alerts-only] [--from-start]
-    Print events and alerts as they're logged
-cyber-alert serve   [LOG] [--rules FILE] [--db FILE] [--host H] [--port P] [--debug]
-    Run the web dashboard
+cyber-alert watch   [LOG] [--config FILE] [--db FILE] [--alerts-only] [--from-start]
+    Print events and alerts as they're logged, and send notifications
+cyber-alert serve   [LOG] [--config FILE] [--db FILE] [--host H] [--port P] [--debug]
+    Run the web dashboard, and send notifications
+cyber-alert test-notifications [--config FILE]
+    Send a test alert to every configured notification channel
 ```
 
 - `LOG` defaults to `$CYBER_ALERT_LOG_FILE`, or `logs/sample_auth.log` if that's unset.
+  `--config` defaults to `$CYBER_ALERT_CONFIG`, or built-in settings if that's unset.
 - `--db` saves alerts to a SQLite database. `serve` always keeps alert history, in
   `cyber-alert.db` unless `--db` says otherwise. When it starts, it processes the whole
   existing log, so activity that happened while it was down still raises alerts.
@@ -126,7 +180,7 @@ cyber-alert serve   [LOG] [--rules FILE] [--db FILE] [--host H] [--port P] [--de
 To monitor a real server (reading auth logs usually requires root or the `adm` group):
 
 ```bash
-sudo .venv/bin/cyber-alert watch /var/log/auth.log --alerts-only --db alerts.db
+sudo .venv/bin/cyber-alert watch /var/log/auth.log --alerts-only --db alerts.db     --config config/cyber-alert.yaml
 ```
 
 ## REST API
@@ -155,16 +209,18 @@ src/cyber_alert/
     detection.py   Rule base class, sliding windows, throttling, detector
     rules/         Detection rules, one per file
     alerts.py      Alert model, severities, ATT&CK techniques
-    config.py      YAML rule configuration and validation
+    notify.py      Slack, Discord, email and webhook notifications
+    config.py      YAML configuration and validation
     store.py       SQLite alert history
     stats.py       Running totals and the login timeline
     monitor.py     Live state the dashboard reads: detection, stats, recent events
     cli.py         `cyber-alert` command
+    text.py        Safe display of attacker-controlled text
     web.py         Flask app factory, security headers, Socket.IO event stream
     api.py         JSON API
     templates/     Dashboard page
     static/        Dashboard JavaScript and CSS
-config/rules.yaml  Rule settings (the built-in defaults)
+config/           Example config file (rule defaults and notification examples)
 tests/             pytest suite
 logs/              Sample auth log
 docs/              Screenshots
@@ -204,8 +260,13 @@ docs/              Screenshots
   has read and uses the file's identity (device and inode) to spot rotation. It reopens
   the file on each poll so it never blocks rotation, including on Windows, where an open
   file can't be renamed.
-- **Escape on output.** In the terminal, control characters in usernames are shown as
-  `\x1b`, so a username can't inject ANSI escape sequences.
+- **Escape for every destination.** Each output escapes usernames for its own syntax:
+  - Terminal: control characters are shown as `\x1b`, so a username can't inject ANSI
+    escape sequences.
+  - Slack: `&`, `<` and `>` are escaped, so a username like `<!channel>` can't ping a
+    whole workspace or hide a link.
+  - Discord: Markdown is escaped and mentions are disabled.
+  - Email: line breaks are escaped, so a username can't add headers such as `Bcc:`.
 - **Year inference.** Classic syslog timestamps have no year. Events are assigned the
   most recent year that doesn't put them in the future, so logs spanning New Year parse
   correctly.
@@ -238,7 +299,7 @@ ruff check . && ruff format --check .
 CI runs linting and the test suite on Python 3.10–3.14 on Linux, plus Windows.
 
 To add a rule, subclass `Rule` in a new file under `src/cyber_alert/rules/`, register it
-in `ALL_RULES`, and add its defaults to `config/rules.yaml`. A test checks that the
+in `ALL_RULES`, and add its defaults to `config/cyber-alert.yaml`. A test checks that the
 config file stays in sync with every rule's defaults.
 
 ## Roadmap
@@ -248,7 +309,7 @@ config file stays in sync with every rule's defaults.
       mapped to MITRE ATT&CK
 - [x] YAML rule configuration and persistent alert storage (SQLite)
 - [x] Live dashboard with charts and alert filtering, and a REST API
-- [ ] Alert notifications (Slack, Discord, email)
+- [x] Alert notifications (Slack, Discord, email, webhooks)
 - [ ] Docker image and an attack simulator for demos
 
 ## License
