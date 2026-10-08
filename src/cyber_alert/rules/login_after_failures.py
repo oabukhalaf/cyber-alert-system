@@ -31,11 +31,13 @@ class LoginAfterFailuresRule(Rule):
             return []
 
         failures = self._failures.get(event.source_ip, event.timestamp)
+        # A successful login ends the run of failures whether or not it alerts: a user
+        # who mistypes once and then gets in, several times an hour, isn't an attack,
+        # and a second login shouldn't re-alert on failures already reported.
+        self._failures.clear(event.source_ip)
         failure_count = sum(e.count for e in failures)
         if failure_count < self.min_failures:
             return []
-        # Start over so a second login doesn't re-alert on the same failures.
-        self._failures.clear(event.source_ip)
 
         span = format_duration(event.timestamp - failures[0].timestamp)
         return [

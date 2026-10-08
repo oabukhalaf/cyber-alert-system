@@ -1,4 +1,4 @@
-"""Command-line interface: ``cyber-alert summary | detect | watch | serve``."""
+"""Command-line interface for ``cyber-alert`` and its subcommands."""
 
 from __future__ import annotations
 
@@ -8,15 +8,19 @@ import os
 import sys
 from collections import Counter
 from collections.abc import Sequence
+from datetime import datetime, timezone
 
 from . import __version__
-from .alerts import Alert
-from .config import ConfigError, load_rules
+from .alerts import BRUTE_FORCE, Alert, Severity
+from .config import ConfigError, load_config
 from .detection import Detector
+from .notify import DeliveryError, Notifier
 from .parser import AuthEvent, EventType, parse_file, parse_line
+from .simulate import run as run_simulation
 from .stats import Summary, summarize
 from .store import AlertStore
 from .tailer import follow
+from .text import printable
 
 FALLBACK_LOG_FILE = "logs/sample_auth.log"
 DEFAULT_DB_FILE = "cyber-alert.db"
@@ -56,14 +60,16 @@ def _build_parser() -> argparse.ArgumentParser:
     summary.add_argument("--top", type=int, default=10, help="rows per table (default: 10)")
     summary.set_defaults(handler=_run_summary)
 
-    rules_args = {
+    config_args = {
         "metavar": "FILE",
-        "help": "YAML rule settings, e.g. config/rules.yaml (default: built-in settings)",
+        "default": os.environ.get("CYBER_ALERT_CONFIG"),
+        "help": "YAML settings, e.g. config/cyber-alert.yaml "
+        "(default: $CYBER_ALERT_CONFIG or built-in settings)",
     }
 
     detect = commands.add_parser("detect", help="run detection rules over a log file")
     detect.add_argument("log_file", **log_file_args)
-    detect.add_argument("--rules", **rules_args)
+    detect.add_argument("--config", **config_args)
     detect.add_argument("--db", metavar="FILE", help="also save alerts to this SQLite database")
     detect.set_defaults(handler=_run_detect)
 
@@ -76,13 +82,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--interval", type=float, default=1.0, help="seconds between polls (default: 1.0)"
     )
     watch.add_argument("--alerts-only", action="store_true", help="print alerts but not events")
-    watch.add_argument("--rules", **rules_args)
+    watch.add_argument("--config", **config_args)
     watch.add_argument("--db", metavar="FILE", help="also save alerts to this SQLite database")
     watch.set_defaults(handler=_run_watch)
 
     serve = commands.add_parser("serve", help="run the web dashboard")
     serve.add_argument("log_file", **log_file_args)
-    serve.add_argument("--rules", **rules_args)
+    serve.add_argument("--config", **config_args)
     serve.add_argument(
         "--db",
         metavar="FILE",
@@ -98,7 +104,42 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     serve.set_defaults(handler=_run_serve)
 
+    test = commands.add_parser(
+        "test-notifications", help="send a test alert to every configured notification channel"
+    )
+    test.add_argument("--config", **config_args)
+    test.set_defaults(handler=_run_test_notifications)
+
+    simulate = commands.add_parser(
+        "simulate", help="write simulated SSH traffic, attacks included, to a log file"
+    )
+    simulate.add_argument("log_file", help="log file to append to (created if missing)")
+    simulate.add_argument(
+        "--speed",
+        type=_positive_float,
+        default=1.0,
+        help="time multiplier, e.g. 5 to run five times faster (default: 1)",
+    )
+    simulate.add_argument(
+        "--duration",
+        type=_positive_float,
+        metavar="SECONDS",
+        help="stop after this many simulated seconds (default: run until stopped)",
+    )
+    simulate.add_argument("--seed", type=int, help="random seed, for repeatable traffic")
+    simulate.set_defaults(handler=_run_simulate)
+
     return parser
+
+
+def _positive_float(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        value = 0
+    if not value > 0:
+        raise argparse.ArgumentTypeError(f"expected a positive number, got {text!r}")
+    return value
 
 
 def _run_summary(args: argparse.Namespace) -> int:
@@ -112,7 +153,7 @@ def _run_summary(args: argparse.Namespace) -> int:
 
 
 def _run_detect(args: argparse.Namespace) -> int:
-    detector = Detector(load_rules(args.rules))
+    detector = Detector(load_config(args.config).rules)
     try:
         events = parse_file(args.log_file)
     except OSError as exc:
@@ -133,8 +174,11 @@ def _run_detect(args: argparse.Namespace) -> int:
 
 
 def _run_watch(args: argparse.Namespace) -> int:
-    detector = Detector(load_rules(args.rules))
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+    config = load_config(args.config)
+    detector = Detector(config.rules)
     store = AlertStore(args.db) if args.db else None
+    notifier = Notifier(config.channels, max_age=config.notify_max_age) if config.channels else None
     print(f"Watching {args.log_file} (Ctrl+C to stop)", file=sys.stderr)
     try:
         lines = follow(args.log_file, from_start=args.from_start, poll_interval=args.interval)
@@ -144,11 +188,16 @@ def _run_watch(args: argparse.Namespace) -> int:
             if not args.alerts_only:
                 print(format_event(event), flush=True)
             for alert in detector.process(event):
-                if store is not None:
-                    store.add(alert)
                 print(format_alert(alert), flush=True)
+                # With a database, only alerts it hasn't seen are new (e.g. after a restart).
+                is_new = store.add(alert) if store is not None else True
+                if is_new and notifier is not None:
+                    notifier.submit(alert)
     except KeyboardInterrupt:
         pass
+    finally:
+        if notifier is not None:
+            notifier.close(timeout=10)
     return 0
 
 
@@ -156,7 +205,7 @@ def _run_serve(args: argparse.Namespace) -> int:
     from .web import create_app, start_log_watcher  # Flask is only needed for this command.
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    app = create_app(args.log_file, db_path=args.db, rules_file=args.rules)
+    app = create_app(args.log_file, db_path=args.db, config_file=args.config)
     start_log_watcher(app)
     # The development server is fine for a single-user dashboard bound to localhost.
     app.extensions["socketio"].run(
@@ -167,6 +216,56 @@ def _run_serve(args: argparse.Namespace) -> int:
         use_reloader=False,
         allow_unsafe_werkzeug=True,
     )
+    return 0
+
+
+def _run_test_notifications(args: argparse.Namespace) -> int:
+    channels = load_config(args.config).channels
+    if not channels:
+        print(
+            "No notification channels are configured. Add them under "
+            "notifications: channels: in the config file.",
+            file=sys.stderr,
+        )
+        return 1
+
+    now = datetime.now(timezone.utc)
+    alert = Alert(
+        rule_id="test",
+        severity=Severity.CRITICAL,
+        technique=BRUTE_FORCE,
+        title="Test notification from cyber-alert",
+        description="If you can read this, alerts will reach this channel.",
+        source_ip="192.0.2.1",
+        usernames=("example",),
+        event_count=1,
+        first_seen=now,
+        last_seen=now,
+    )
+    failed = 0
+    for channel in channels:  # every channel, whatever its min_severity
+        try:
+            channel.send(alert)
+        except DeliveryError as exc:
+            failed += 1
+            print(f"FAILED  {channel.describe()}: {exc}")
+        else:
+            print(f"OK      {channel.describe()}")
+    return 1 if failed else 0
+
+
+def _run_simulate(args: argparse.Namespace) -> int:
+    print(f"Writing simulated SSH traffic to {args.log_file} (Ctrl+C to stop)", file=sys.stderr)
+    try:
+        written = run_simulation(
+            args.log_file, speed=args.speed, duration=args.duration, seed=args.seed
+        )
+    except KeyboardInterrupt:
+        return 0
+    except OSError as exc:
+        print(f"error: cannot write {args.log_file}: {exc.strerror}", file=sys.stderr)
+        return 1
+    print(f"Wrote {written} lines", file=sys.stderr)
     return 0
 
 
@@ -189,7 +288,7 @@ def format_summary(summary: Summary, *, source: str, top: int = 10) -> str:
     for title, counter in tables:
         if not counter:
             continue
-        rows = [(_display(key), count) for key, count in counter.most_common(top)]
+        rows = [(printable(key), count) for key, count in counter.most_common(top)]
         width = max(len(label) for label, _ in rows)
         lines += ["", title]
         lines += [f"  {label:<{width}}  {count:>6}" for label, count in rows]
@@ -201,7 +300,7 @@ def format_summary(summary: Summary, *, source: str, top: int = 10) -> str:
 def format_event(event: AuthEvent) -> str:
     text = (
         f"{event.timestamp:%Y-%m-%d %H:%M:%S}  {_EVENT_LABELS[event.event_type]:<8}  "
-        f"{_display(event.username)} from {event.source_ip}"
+        f"{printable(event.username)} from {event.source_ip}"
     )
     if event.method:
         text += f" via {event.method}"
@@ -215,8 +314,8 @@ def format_event(event: AuthEvent) -> str:
 def format_alert(alert: Alert) -> str:
     return (
         f"{alert.last_seen:%Y-%m-%d %H:%M:%S}  ALERT  {alert.severity.name:<8}  "
-        f"{alert.technique.id:<9}  {_display(alert.title)}\n"
-        f"{'':21}{_display(alert.description)}"
+        f"{alert.technique.id:<9}  {printable(alert.title)}\n"
+        f"{'':21}{printable(alert.description)}"
     )
 
 
@@ -228,14 +327,3 @@ def format_alert_totals(alerts: Sequence[Alert]) -> str:
         f"{counts[severity]} {severity.name.lower()}" for severity in sorted(counts, reverse=True)
     )
     return f"{len(alerts)} alert{'s' if len(alerts) != 1 else ''}: {breakdown}"
-
-
-def _display(value: str) -> str:
-    """Render attacker-controlled log text safely for a terminal.
-
-    Escaping control characters stops a crafted username from injecting ANSI
-    escape sequences that could rewrite or hide earlier terminal output.
-    """
-    if not value:
-        return "(empty)"
-    return "".join(ch if ch.isprintable() else f"\\x{ord(ch):02x}" for ch in value)

@@ -21,8 +21,12 @@ and are saved to SQLite.
 - **Detection rules mapped to MITRE ATT&CK.** Stateful sliding-window rules with
   per-rule thresholds, alert throttling, and severity levels (see
   [Detection rules](#detection-rules)).
-- **Configurable.** Tune or disable rules in a YAML file. Misspelled settings and
-  invalid values are reported as errors instead of being silently ignored.
+- **Notifications.** Sends alerts to Slack, Discord, email or any webhook, with
+  retries, per-channel severity thresholds, and escaping so attacker-chosen usernames
+  can't ping a channel or inject email headers (see [Notifications](#notifications)).
+- **Configurable.** Tune rules and notifications in one YAML file, with secrets kept
+  in environment variables. Misspelled settings and invalid values are reported as
+  errors instead of being silently ignored.
 - **Persistent alert history.** Alerts are stored in SQLite, and storing the same
   alert twice has no effect, so restarts and re-scans never create duplicates.
 - **Robust log parsing.** Handles password, public-key and keyboard-interactive logins,
@@ -37,12 +41,28 @@ and are saved to SQLite.
   table view, in light and dark themes.
 - **REST API.** Read-only JSON endpoints for the summary, timeline, alerts and events
   (see [REST API](#rest-api)).
-- **Command line.** `summary`, `detect`, `watch` and `serve` commands.
+- **Attack simulator and Docker.** `docker compose up` runs the dashboard against
+  simulated brute-force, password-spray and break-in attacks, and CI does the same
+  end to end (see [Docker](#docker)).
+- **Command line.** `summary`, `detect`, `watch`, `serve`, `simulate` and
+  `test-notifications` commands.
 - **Safe handling of hostile input.** Log contents are attacker-controlled, so the
   parser, terminal output and dashboard are all built so that input can't spoof,
   inject into or hide anything.
 
 ## Quick start
+
+The fastest way to see it work is Docker, which starts the dashboard alongside a
+simulator that stages attacks against it:
+
+```bash
+git clone https://github.com/oabukhalaf/cyber-alert-system.git
+cd cyber-alert-system
+docker compose up --build
+```
+
+Then open <http://127.0.0.1:5000>; alerts appear within a minute. To install it
+directly instead:
 
 ```bash
 git clone https://github.com/oabukhalaf/cyber-alert-system.git
@@ -88,7 +108,8 @@ The dashboard updates within about two seconds as lines are appended to the log.
 | `ssh-login-after-failures` | [T1110](https://attack.mitre.org/techniques/T1110/) Brute Force | Critical | A login **succeeds** from an IP with 3+ failed logins in the previous 10 minutes |
 
 A sustained attack produces one alert, not one per log line. To change thresholds or
-turn rules off, edit [`config/rules.yaml`](config/rules.yaml) and pass it with `--rules`:
+turn rules off, edit [`config/cyber-alert.yaml`](config/cyber-alert.yaml) and pass it
+with `--config` (or set `$CYBER_ALERT_CONFIG`):
 
 ```yaml
 rules:
@@ -101,20 +122,70 @@ rules:
 
 Rules left out of the file keep their defaults.
 
+## Notifications
+
+`serve` and `watch` can send alerts as they're raised. Add channels to the
+`notifications` section of the config file:
+
+```yaml
+notifications:
+  min_severity: high      # default; low, medium, high or critical
+  max_age: 1h             # alerts about older activity are stored but not sent
+  channels:
+    - type: slack
+      webhook_url: ${SLACK_WEBHOOK_URL}
+    - type: discord
+      webhook_url: ${DISCORD_WEBHOOK_URL}
+      min_severity: critical
+    - type: email
+      smtp_host: smtp.example.com
+      username: ${SMTP_USERNAME}
+      password: ${SMTP_PASSWORD}
+      from: alerts@example.com
+      to: [oncall@example.com]
+    - type: webhook       # POSTs {"source": "cyber-alert", "alert": {...}} as JSON
+      url: https://example.com/hooks/cyber-alert
+      headers:
+        Authorization: Bearer ${WEBHOOK_TOKEN}
+```
+
+`${NAME}` is replaced with the environment variable `NAME` when the file is loaded,
+so secrets stay out of the file. Then check that every channel works:
+
+```bash
+cyber-alert test-notifications --config config/cyber-alert.yaml
+```
+
+- **Only new alerts are sent.** With a database, alerts already stored (for example,
+  after a restart) aren't sent again.
+- **No floods from history.** `max_age` keeps a first run over an old log from
+  sending days of alerts at once.
+- **Delivery never slows detection.** Alerts are sent from a background thread with a
+  10-second timeout and up to 3 attempts, backing off between them (and honoring
+  `Retry-After` when rate-limited). Errors that retrying can't fix, such as a rejected
+  webhook URL, aren't retried.
+- Webhook URLs must use `https://` (plain `http://` is allowed only to `localhost`),
+  and log messages identify channels by host only, never by their secret URL.
+
 ## Usage
 
 ```text
 cyber-alert summary [LOG] [--top N]
     Login statistics for a log file
-cyber-alert detect  [LOG] [--rules FILE] [--db FILE]
+cyber-alert simulate LOG [--speed X] [--duration SECONDS] [--seed N]
+    Append simulated SSH traffic, attacks included, to a log file
+cyber-alert detect  [LOG] [--config FILE] [--db FILE]
     Run detection rules over a log file
-cyber-alert watch   [LOG] [--rules FILE] [--db FILE] [--alerts-only] [--from-start]
-    Print events and alerts as they're logged
-cyber-alert serve   [LOG] [--rules FILE] [--db FILE] [--host H] [--port P] [--debug]
-    Run the web dashboard
+cyber-alert watch   [LOG] [--config FILE] [--db FILE] [--alerts-only] [--from-start]
+    Print events and alerts as they're logged, and send notifications
+cyber-alert serve   [LOG] [--config FILE] [--db FILE] [--host H] [--port P] [--debug]
+    Run the web dashboard, and send notifications
+cyber-alert test-notifications [--config FILE]
+    Send a test alert to every configured notification channel
 ```
 
 - `LOG` defaults to `$CYBER_ALERT_LOG_FILE`, or `logs/sample_auth.log` if that's unset.
+  `--config` defaults to `$CYBER_ALERT_CONFIG`, or built-in settings if that's unset.
 - `--db` saves alerts to a SQLite database. `serve` always keeps alert history, in
   `cyber-alert.db` unless `--db` says otherwise. When it starts, it processes the whole
   existing log, so activity that happened while it was down still raises alerts.
@@ -126,7 +197,53 @@ cyber-alert serve   [LOG] [--rules FILE] [--db FILE] [--host H] [--port P] [--de
 To monitor a real server (reading auth logs usually requires root or the `adm` group):
 
 ```bash
-sudo .venv/bin/cyber-alert watch /var/log/auth.log --alerts-only --db alerts.db
+sudo .venv/bin/cyber-alert watch /var/log/auth.log --alerts-only \
+    --db alerts.db --config config/cyber-alert.yaml
+```
+
+To generate traffic to watch, `simulate` appends realistic sshd lines in real time:
+staff logins with occasional mistyped passwords, and every so often a brute force,
+a password spray or a break-in. Attackers use reserved documentation IP ranges.
+
+```bash
+cyber-alert simulate demo.log --speed 5      # in one terminal
+cyber-alert serve demo.log                   # in another
+```
+
+`--speed` scales time, `--duration SECONDS` stops after that much simulated time, and
+`--seed` makes the traffic repeatable.
+
+## Docker
+
+```bash
+docker compose up --build
+```
+
+This starts the dashboard at <http://127.0.0.1:5000> together with the simulator, so
+alerts appear within a minute. Set `SIMULATOR_SPEED=5` to speed things up. The image
+runs as an unprivileged user, keeps alert history in a volume, and has a health
+check. The port is published on `127.0.0.1` only, because the dashboard has no login.
+
+To monitor a real server instead, run only the dashboard and give it the host's logs.
+Mount the log *directory* rather than the file: logrotate replaces the file, and a
+single-file mount would keep pointing at the old one.
+
+```yaml
+# compose.override.yaml
+services:
+  dashboard:
+    volumes:
+      - /var/log:/host-logs:ro
+      - ./my-config.yaml:/etc/cyber-alert/cyber-alert.yaml:ro
+    environment:
+      CYBER_ALERT_LOG_FILE: /host-logs/auth.log
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+    group_add:
+      - "4"   # the host's adm group (Debian/Ubuntu), which can read auth.log
+```
+
+```bash
+docker compose up --build --detach dashboard
 ```
 
 ## REST API
@@ -155,19 +272,24 @@ src/cyber_alert/
     detection.py   Rule base class, sliding windows, throttling, detector
     rules/         Detection rules, one per file
     alerts.py      Alert model, severities, ATT&CK techniques
-    config.py      YAML rule configuration and validation
+    notify.py      Slack, Discord, email and webhook notifications
+    config.py      YAML configuration and validation
     store.py       SQLite alert history
     stats.py       Running totals and the login timeline
     monitor.py     Live state the dashboard reads: detection, stats, recent events
     cli.py         `cyber-alert` command
+    simulate.py    Realistic SSH traffic generator for demos and tests
+    text.py        Safe display of attacker-controlled text
     web.py         Flask app factory, security headers, Socket.IO event stream
     api.py         JSON API
     templates/     Dashboard page
     static/        Dashboard JavaScript and CSS
-config/rules.yaml  Rule settings (the built-in defaults)
+config/            Example config file (rule defaults and notification examples)
 tests/             pytest suite
 logs/              Sample auth log
 docs/              Screenshots
+Dockerfile         Two-stage image build, non-root
+compose.yaml       Dashboard plus simulator demo
 ```
 
 ## Design notes
@@ -181,6 +303,11 @@ docs/              Screenshots
 - **Group by what defines the attack.** Brute force groups failures by source IP *and*
   username, and spraying counts distinct usernames per IP. Grouping brute force by IP
   alone would also flag every password spray, with the wrong technique.
+- **A successful login ends a run of failures.** Both failure-counting rules reset when
+  the user gets in, so someone who mistypes a password now and then never looks like
+  an attacker, while guessing that *does* succeed is caught as a critical
+  login-after-failures alert. The attack simulator found both of these false
+  positives, and a test now runs it at 10x speed to keep them from coming back.
 - **Throttle, don't flood.** The brute-force and spray rules alert at most once per
   attacker per window, and the login rule forgets the failures it has already reported.
   Otherwise one attack of thousands of attempts would bury the alert that matters.
@@ -204,8 +331,13 @@ docs/              Screenshots
   has read and uses the file's identity (device and inode) to spot rotation. It reopens
   the file on each poll so it never blocks rotation, including on Windows, where an open
   file can't be renamed.
-- **Escape on output.** In the terminal, control characters in usernames are shown as
-  `\x1b`, so a username can't inject ANSI escape sequences.
+- **Escape for every destination.** Each output escapes usernames for its own syntax:
+  - Terminal: control characters are shown as `\x1b`, so a username can't inject ANSI
+    escape sequences.
+  - Slack: `&`, `<` and `>` are escaped, so a username like `<!channel>` can't ping a
+    whole workspace or hide a link.
+  - Discord: Markdown is escaped and mentions are disabled.
+  - Email: line breaks are escaped, so a username can't add headers such as `Bcc:`.
 - **Year inference.** Classic syslog timestamps have no year. Events are assigned the
   most recent year that doesn't put them in the future, so logs spanning New Year parse
   correctly.
@@ -235,10 +367,12 @@ pytest --cov=cyber_alert     # tests with coverage
 ruff check . && ruff format --check .
 ```
 
-CI runs linting and the test suite on Python 3.10–3.14 on Linux, plus Windows.
+CI runs linting and the test suite on Python 3.10–3.14 on Linux, plus Windows. An
+end-to-end job builds the Docker image, runs it against the attack simulator, and
+fails unless every alert type is raised.
 
 To add a rule, subclass `Rule` in a new file under `src/cyber_alert/rules/`, register it
-in `ALL_RULES`, and add its defaults to `config/rules.yaml`. A test checks that the
+in `ALL_RULES`, and add its defaults to `config/cyber-alert.yaml`. A test checks that the
 config file stays in sync with every rule's defaults.
 
 ## Roadmap
@@ -248,8 +382,11 @@ config file stays in sync with every rule's defaults.
       mapped to MITRE ATT&CK
 - [x] YAML rule configuration and persistent alert storage (SQLite)
 - [x] Live dashboard with charts and alert filtering, and a REST API
-- [ ] Alert notifications (Slack, Discord, email)
-- [ ] Docker image and an attack simulator for demos
+- [x] Alert notifications (Slack, Discord, email, webhooks)
+- [x] Docker image and an attack simulator for demos
+- [ ] GeoIP and ASN enrichment for source addresses
+- [ ] More log sources (web server and VPN authentication logs)
+- [ ] Optional automatic blocking of attacking addresses, as fail2ban does
 
 ## License
 

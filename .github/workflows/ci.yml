@@ -42,3 +42,42 @@ jobs:
           cache-dependency-path: pyproject.toml
       - run: pip install -e ".[dev]"
       - run: pytest --cov=cyber_alert --cov-report=term-missing
+
+  docker:
+    # End-to-end: build the image, run the dashboard against the attack simulator,
+    # and require every kind of simulated attack to be detected.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and start the dashboard and simulator
+        run: docker compose up --detach --build --wait 2>&1 | tee compose-up.log
+        env:
+          SIMULATOR_SPEED: "5"
+      - name: Wait for all three alert types
+        run: |
+          for attempt in $(seq 1 45); do
+            kinds=$(curl -fsS http://127.0.0.1:5000/api/alerts \
+              | python3 -c "import json, sys; print(len({a['rule_id'] for a in json.load(sys.stdin)['alerts']}))" \
+              || echo 0)
+            if [ "$kinds" = "3" ]; then
+              echo "All three alert types raised after about $((attempt * 2)) seconds"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Expected all three alert types within 90 seconds"
+          exit 1
+      - name: Report what went wrong
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color > compose.log || true
+          cat compose.log
+          # Also post the end of the output as an annotation on the PR, which can be
+          # read without opening the CI log. Annotations encode "%" and newlines.
+          summary="$( { tail -n 5 compose-up.log 2>/dev/null; tail -n 25 compose.log; } \
+            | sed -e 's/%/%25/g' -e 's/\r//g' | awk 'BEGIN { ORS = "%0A" } { print }')"
+          echo "::error title=docker job failed::${summary}"
+      - name: Stop
+        if: always()
+        run: docker compose down --volumes

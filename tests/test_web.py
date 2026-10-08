@@ -132,9 +132,30 @@ def test_background_watcher_processes_existing_and_new_lines(make_app, log_file)
     assert [m["name"] for m in messages].count("alert") == 1
 
 
-def test_invalid_rules_file_fails_at_startup(make_app, log_file, tmp_path):
+def test_invalid_config_file_fails_at_startup(make_app, log_file, tmp_path):
     rules = tmp_path / "rules.yaml"
     rules.write_text("rules:\n  ssh-nope: {}\n", encoding="utf-8")
 
     with pytest.raises(ConfigError):
-        make_app(log_file, rules_file=rules)
+        make_app(log_file, config_file=rules)
+
+
+def test_new_alerts_are_sent_to_notification_channels(make_app, log_file, tmp_path, webhook_server):
+    config = tmp_path / "cyber-alert.yaml"
+    config.write_text(
+        "notifications:\n  max_age: 3650d\n  channels:\n"
+        f"    - {{type: webhook, url: '{webhook_server.url}'}}\n",
+        encoding="utf-8",
+    )
+    app = make_app(log_file, config_file=config)
+    append(log_file, BREAK_IN)
+
+    publish_new_events(app, LogTailer(log_file, from_start=True))
+    app.extensions["notifier"].close()
+
+    rule_ids = [request["json"]["alert"]["rule_id"] for request in webhook_server.received]
+    assert rule_ids == ["ssh-login-after-failures"]
+
+
+def test_no_notifier_without_channels(make_app, log_file):
+    assert make_app(log_file).extensions["notifier"] is None
