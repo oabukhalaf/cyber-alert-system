@@ -1,4 +1,4 @@
-"""Command-line interface: ``cyber-alert summary | detect | watch | serve | test-notifications``."""
+"""Command-line interface for ``cyber-alert`` and its subcommands."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .config import ConfigError, load_config
 from .detection import Detector
 from .notify import DeliveryError, Notifier
 from .parser import AuthEvent, EventType, parse_file, parse_line
+from .simulate import run as run_simulation
 from .stats import Summary, summarize
 from .store import AlertStore
 from .tailer import follow
@@ -109,7 +110,36 @@ def _build_parser() -> argparse.ArgumentParser:
     test.add_argument("--config", **config_args)
     test.set_defaults(handler=_run_test_notifications)
 
+    simulate = commands.add_parser(
+        "simulate", help="write simulated SSH traffic, attacks included, to a log file"
+    )
+    simulate.add_argument("log_file", help="log file to append to (created if missing)")
+    simulate.add_argument(
+        "--speed",
+        type=_positive_float,
+        default=1.0,
+        help="time multiplier, e.g. 5 to run five times faster (default: 1)",
+    )
+    simulate.add_argument(
+        "--duration",
+        type=_positive_float,
+        metavar="SECONDS",
+        help="stop after this many simulated seconds (default: run until stopped)",
+    )
+    simulate.add_argument("--seed", type=int, help="random seed, for repeatable traffic")
+    simulate.set_defaults(handler=_run_simulate)
+
     return parser
+
+
+def _positive_float(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        value = 0
+    if not value > 0:
+        raise argparse.ArgumentTypeError(f"expected a positive number, got {text!r}")
+    return value
 
 
 def _run_summary(args: argparse.Namespace) -> int:
@@ -222,6 +252,21 @@ def _run_test_notifications(args: argparse.Namespace) -> int:
         else:
             print(f"OK      {channel.describe()}")
     return 1 if failed else 0
+
+
+def _run_simulate(args: argparse.Namespace) -> int:
+    print(f"Writing simulated SSH traffic to {args.log_file} (Ctrl+C to stop)", file=sys.stderr)
+    try:
+        written = run_simulation(
+            args.log_file, speed=args.speed, duration=args.duration, seed=args.seed
+        )
+    except KeyboardInterrupt:
+        return 0
+    except OSError as exc:
+        print(f"error: cannot write {args.log_file}: {exc.strerror}", file=sys.stderr)
+        return 1
+    print(f"Wrote {written} lines", file=sys.stderr)
+    return 0
 
 
 def format_summary(summary: Summary, *, source: str, top: int = 10) -> str:
