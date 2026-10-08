@@ -27,7 +27,11 @@ services:
     volumes:
       - logs:/logs
     healthcheck:
-      disable: true  # the image's check is for the dashboard
+      # Healthy once it has written traffic. (The image's own check is for the
+      # dashboard, and Compose v2's --wait rejects a service with no check at all.)
+      test: ["CMD-SHELL", "test -s /logs/auth.log"]
+      interval: 5s
+      start_period: 30s
     restart: unless-stopped
 
 volumes:
