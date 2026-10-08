@@ -76,6 +76,23 @@ def test_only_failed_logins_count():
     assert run(rule, events) == []
 
 
+def test_a_successful_login_resets_the_count():
+    # A user who mistypes now and then but always gets in isn't being brute forced.
+    rule = BruteForceRule(threshold=3, window=timedelta(seconds=60))
+    events = []
+    for second in (0, 10, 20, 30):
+        events += [failure("bob", at=second), success("bob", at=second + 2)]
+
+    assert run(rule, events) == []
+
+
+def test_another_users_login_does_not_reset_the_count():
+    rule = BruteForceRule(threshold=3, window=timedelta(seconds=60))
+    events = [failure("root", at=0), failure("root", at=1), success("alice", at=2)]
+
+    assert len(run(rule, [*events, failure("root", at=3)])) == 1
+
+
 def test_one_alert_per_window_during_a_sustained_attack():
     rule = BruteForceRule(threshold=3, window=timedelta(seconds=60))
     events = [failure("root", at=seconds) for seconds in range(0, 180, 5)]  # every 5s for 3 min

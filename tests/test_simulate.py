@@ -15,11 +15,11 @@ NOW = datetime(2026, 10, 8, 23, 0).astimezone()
 STAFF = {"alice", "bob", "j.smith"}
 
 
-def simulated_lines(seed=1, steps=600):
+def simulated_lines(seed=1, steps=600, speed=1):
     """Simulated log lines, timestamped by each step's delay rather than the wall clock."""
     when = BASE
     for step in itertools.islice(Simulator(random.Random(seed)).steps(), steps):
-        when += timedelta(seconds=step.delay)
+        when += timedelta(seconds=step.delay / speed)
         yield format_line(when, "web-01", step)
 
 
@@ -56,8 +56,13 @@ def test_every_line_is_valid_and_sshd_auth_lines_parse():
     assert len(events) + len(noise) == len(lines)
 
 
-def test_simulated_attacks_raise_every_alert_type_and_staff_raise_none():
-    events = [event for line in simulated_lines() if (event := parse_line(line, now=NOW))]
+# Running faster packs staff typos into fewer minutes of each rule's window, which
+# once made a user's routine mistyped passwords look like a brute force.
+@pytest.mark.parametrize("speed", [1, 10])
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_simulated_attacks_raise_every_alert_type_and_staff_raise_none(seed, speed):
+    lines = simulated_lines(seed=seed, steps=1500, speed=speed)
+    events = [event for line in lines if (event := parse_line(line, now=NOW))]
 
     alerts = list(Detector(load_rules()).run(events))
 

@@ -28,12 +28,17 @@ class BruteForceRule(Rule):
         self._throttle = Throttle(window)
 
     def process(self, event: AuthEvent) -> list[Alert]:
-        if event.event_type is not EventType.AUTH_FAILURE:
-            return []
-
         # Group by source *and* username: one IP cycling through many usernames
         # is spraying, which PasswordSprayRule covers.
         key = (event.source_ip, event.username)
+        if event.event_type is EventType.AUTH_SUCCESS:
+            # Getting in shows the user knows the password, so the failures before
+            # were typos. (Guessing that succeeds is LoginAfterFailuresRule's job.)
+            self._failures.clear(key)
+            return []
+        if event.event_type is not EventType.AUTH_FAILURE:
+            return []
+
         recent = self._failures.add(key, event)
         # One "message repeated N times" line stands for N failures.
         failure_count = sum(e.count for e in recent)
